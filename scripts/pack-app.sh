@@ -49,9 +49,26 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
 </plist>
 PLIST
 
-# Ad-hoc sign so the app has a stable identity (keeps the Accessibility grant
-# from resetting on every rebuild).
-codesign --force --sign - "$APP" >/dev/null 2>&1 || echo "   (codesign skipped)"
+# Sign with a STABLE identity if one exists, so macOS keeps the Accessibility
+# grant across rebuilds. Ad-hoc (`-`) pins the signature to the binary's cdhash,
+# which changes every build → the grant resets. A real cert (Developer ID, or a
+# self-signed "agent-whip" code-signing cert) gives a stable designated
+# requirement. Override with SIGN_ID=... ; falls back to ad-hoc if none found.
+if [[ -z "${SIGN_ID:-}" ]]; then
+  SIGN_ID="$(security find-identity -v -p codesigning 2>/dev/null \
+             | grep -m1 'Developer ID Application' | sed -E 's/.*"(.*)"/\1/' || true)"
+fi
+if [[ -z "${SIGN_ID:-}" ]]; then
+  SIGN_ID="$(security find-identity -v -p codesigning 2>/dev/null \
+             | grep -m1 'agent-whip' | sed -E 's/.*"(.*)"/\1/' || true)"
+fi
+SIGN_ID="${SIGN_ID:--}"
+if [[ "$SIGN_ID" == "-" ]]; then
+  echo "   (ad-hoc signing — Accessibility grant will reset on rebuild; make a stable cert, see README)"
+else
+  echo "   (signing with stable identity: $SIGN_ID)"
+fi
+codesign --force --sign "$SIGN_ID" "$APP" >/dev/null 2>&1 || echo "   (codesign skipped)"
 
 echo "==> built $APP"
 

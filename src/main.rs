@@ -2,17 +2,21 @@
 //!
 //! Sits in the tray. Click the tray icon to spawn a whip that follows your
 //! cursor as a transparent, always-on-top overlay; flick it fast and the tip
-//! cracks — playing a sound and sending Ctrl-C + an encouraging phrase to
-//! whatever app you were using. Click (or click the tray again) to drop it.
+//! cracks — playing a sound and typing a phrase into whatever app you were
+//! using (by default a non-interrupting `/btw` nudge; Ctrl-C is opt-in via
+//! config). Click (or click the tray again) to drop it.
 
 mod config;
 mod gpu;
 mod input;
 mod keys;
+mod logging;
 mod render;
 mod sound;
 mod tray;
 mod whip;
+
+use logging::log;
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -143,9 +147,9 @@ impl App {
             self.input = input::Input::try_new();
             if self.input.is_none() && !self.warned_no_perm {
                 self.warned_no_perm = true;
-                eprintln!(
+                log!(
                     "agent-whip needs Accessibility permission to follow the cursor and \
-                     send keystrokes.\nGrant it in System Settings ▸ Privacy & Security ▸ \
+                     send keystrokes. Grant it in System Settings ▸ Privacy & Security ▸ \
                      Accessibility (a prompt may have appeared), then relaunch agent-whip."
                 );
             }
@@ -201,14 +205,15 @@ impl App {
     /// typed phrase for 300 ms later. All keystroke work stays on this (main)
     /// thread — enigo's macOS backend asserts it must.
     fn crack(&mut self, now: Instant) {
-        self.sound.play_crack();
         self.cfg.reload_if_changed();
+        let sound = self.cfg.pick_sound();
+        self.sound.play_crack(sound);
         let send_interrupt = self.cfg.send_interrupt();
         let send_enter = self.cfg.send_enter();
         let phrase = self.cfg.pick_phrase();
 
         if self.dry_run {
-            println!(
+            log!(
                 "[dry-run] crack -> {}type {:?}{}",
                 if send_interrupt { "Ctrl-C + " } else { "" },
                 phrase,
@@ -412,11 +417,16 @@ fn main() {
     let selftest = args.iter().any(|a| a == "--selftest");
     // Self-test never injects keystrokes.
     let dry_run = selftest || args.iter().any(|a| a == "--dry-run");
+    log!(
+        "agent-whip {} starting; logging to {}",
+        env!("CARGO_PKG_VERSION"),
+        logging::path().display()
+    );
     if dry_run {
-        println!("agent-whip: --dry-run (keystroke injection disabled)");
+        log!("agent-whip: --dry-run (keystroke injection disabled)");
     }
     if selftest {
-        println!("agent-whip: --selftest (synthetic cursor, will exit)");
+        log!("agent-whip: --selftest (synthetic cursor, will exit)");
     }
 
     let mut builder = EventLoop::<UserEvent>::with_user_event();
@@ -451,7 +461,7 @@ fn main() {
                     }
                 });
             }
-            Err(e) => eprintln!("agent-whip: could not install signal handler: {e}"),
+            Err(e) => log!("agent-whip: could not install signal handler: {e}"),
         }
     }
 

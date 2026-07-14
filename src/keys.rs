@@ -8,6 +8,7 @@
 //! 300 ms gap between interrupt and typing is handled by the event loop
 //! deferring `type_phrase`, not by sleeping here.
 
+use crate::logging::log;
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
 
 /// Create the keystroke backend. `None` if unavailable (e.g. Accessibility not
@@ -16,7 +17,7 @@ pub fn new_enigo() -> Option<Enigo> {
     match Enigo::new(&Settings::default()) {
         Ok(e) => Some(e),
         Err(e) => {
-            eprintln!("agent-whip: keyboard control unavailable ({e}); grant Accessibility.");
+            log!("agent-whip: keyboard control unavailable ({e}); grant Accessibility.");
             None
         }
     }
@@ -29,7 +30,7 @@ pub fn interrupt(enigo: &mut Enigo) {
         enigo.key(Key::Unicode('c'), Direction::Click)?;
         enigo.key(Key::Control, Direction::Release)
     })() {
-        eprintln!("agent-whip: interrupt failed: {e}");
+        log!("agent-whip: interrupt failed: {e}");
     }
 }
 
@@ -42,6 +43,6 @@ pub fn type_phrase(enigo: &mut Enigo, text: &str, send_enter: bool) {
         }
         Ok(())
     })() {
-        eprintln!("agent-whip: type failed: {e}");
+        log!("agent-whip: type failed: {e}");
     }
 }

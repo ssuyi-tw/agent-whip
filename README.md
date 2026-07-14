@@ -5,8 +5,9 @@ Sometimes your coding agent is going too shlow, and you must whip it into shape.
 A **native Rust** port of [OpenWhip](https://github.com/GitFrog1111/OpenWhip) —
 no Electron, no browser engine, one self-contained binary. It lives in the
 system tray; click it to summon a bullwhip that follows your cursor. Flick the
-whip and *crack* — it plays a sound and fires an interrupt (`Ctrl-C`) plus an
-encouraging phrase into whatever app you were just using.
+whip and *crack* — it plays a sound and types a phrase into whatever app you
+were just using. By default it types `/btw hold on`, which nudges Claude Code
+*without* interrupting the running turn; Ctrl-C is opt-in (see below).
 
 ## What it does
 
@@ -19,9 +20,10 @@ encouraging phrase into whatever app you were just using.
   bend limits, and screen-edge slaps, rendered as an anti-aliased Catmull-Rom
   spline. Ported verbatim from OpenWhip; the tunables live in `src/whip.rs` and
   `src/render.rs`.
-- **The crack** — flick the tip past the speed threshold and it plays one of
-  five crack sounds and sends `Ctrl-C` + a random phrase (`FASTER`,
-  `GO FASTER`, `Speed it up clanker`, …) + `Enter` to the focused app.
+- **The crack** — flick the tip past the speed threshold and it plays a crack
+  sound and types a phrase + `Enter` into the focused app. The default phrase is
+  `/btw hold on` (a non-interrupting Claude Code nudge); the phrase set, the
+  optional `Ctrl-C`, and the sounds are all configurable (see below).
 
 ## Build & run
 
@@ -47,8 +49,38 @@ menu-bar agent — `LSUIElement`, so no dock icon):
 scripts/pack-app.sh --install   # builds dist/AgentWhip.app and copies it to /Applications
 ```
 
-Then find **AgentWhip** in Raycast/Spotlight. (The app bundle's binary is a new
-identity, so macOS will ask for Accessibility again on first whip.)
+Then find **AgentWhip** in Raycast/Spotlight.
+
+**Keep the Accessibility grant across rebuilds.** Ad-hoc signing pins the app's
+identity to the binary hash, which changes every build — so macOS re-asks for
+Accessibility each time. Sign with a real certificate for a stable identity and
+the grant sticks. `pack-app.sh` auto-uses a **Developer ID Application** cert or a
+self-signed **agent-whip** code-signing cert if it finds one (override with
+`SIGN_ID=…`), else falls back to ad-hoc. To make a free self-signed one: Keychain
+Access → Certificate Assistant → *Create a Certificate* → name `agent-whip`,
+Identity Type *Self Signed Root*, Certificate Type *Code Signing*.
+
+## Distribute a signed DMG
+
+To hand the app to someone else's Mac without a Gatekeeper wall, build a signed,
+notarized DMG:
+
+```bash
+scripts/make-dmg.sh    # → dist/AgentWhip-<version>.dmg
+```
+
+The full path needs an Apple Developer Program membership, a **Developer ID
+Application** certificate in your keychain, and notary credentials stored once:
+
+```bash
+xcrun notarytool store-credentials agent-whip-notary \
+  --apple-id "you@example.com" --team-id "TEAMID" --password "app-specific-pw"
+```
+
+With those present the script signs (hardened runtime), builds the DMG,
+notarizes, and staples it. **Without** a Developer ID it still emits a mountable,
+ad-hoc-signed DMG — recipients just right-click → *Open* the first time. See the
+script header for the env vars (`DEVID`, `NOTARY_PROFILE`, …).
 
 ## Summon it without the tray icon
 
@@ -81,29 +113,54 @@ requires OS input access:
   (same caveat as the original's `xdotool`).
 - **Windows** — works out of the box.
 
-## Configure the crack prompt
+## Configure the crack
 
-What the whip types after it cracks is read from a config file, created with
-defaults on first run and **re-read on every crack** — so edit, save, and the
-next crack uses it (no restart, no rebuild):
+What the whip types (and the sounds it plays) is read from a config file,
+created with defaults on first run and **re-read on every crack** — so edit,
+save, and the next crack uses it (no restart, no rebuild):
 
 ```
 ~/.config/agent-whip/config.toml      # or $XDG_CONFIG_HOME/agent-whip/config.toml
 ```
 ```toml
-# One line is picked at random each crack.
+# One line is picked at random each crack. The default routes through Claude
+# Code's /btw, which queues a note to the agent WITHOUT interrupting the
+# running turn — that's why send_interrupt is off.
 phrases = [
-  "FASTER",
-  "GO FASTER",
-  "Work FASTER",
-  "Speed it up clanker",
+  "/btw hold on",
 ]
 
-send_interrupt = true   # send Ctrl-C before typing
+send_interrupt = false  # send Ctrl-C before typing (off: don't interrupt the turn)
 send_enter     = true   # press Enter after typing
+
+# Custom crack sounds — absolute paths or ~/…, one picked at random each crack.
+# Leave empty to use the five built-in clips. Any format rodio decodes
+# (wav, mp3, flac, ogg, …). Missing/unreadable files fall back to the built-ins.
+sounds = [
+  # "~/Sounds/my-crack.wav",
+]
 ```
 
+Want the old "whip it faster" behavior? Set `send_interrupt = true` and put your
+own phrases (`"FASTER"`, `"GO FASTER"`, …) in `phrases`.
+
 If the file is missing or invalid, the built-in defaults are used.
+
+## Troubleshooting
+
+Running as a menu-bar `.app` there's no terminal, so agent-whip logs to a file
+you can tail:
+
+```bash
+tail -f /tmp/agent-whip.log
+```
+
+- **No sound after switching audio output** — fixed: the output device is
+  reopened on each crack, so it follows the current system default (headphones,
+  AirPods, a display's speakers). If it's still silent, the log will say why
+  (e.g. `no audio output`, or a decode failure for a custom `sounds` file).
+- **Whip won't spawn / nothing types** — almost always a missing Accessibility
+  grant; the log says so. See Permissions above.
 
 ## How this differs from OpenWhip
 
@@ -113,7 +170,7 @@ If the file is missing or invalid, the built-in defaults are used.
 | UI / physics | HTML `<canvas>` + JS | `tiny-skia` + `wgpu`, all Rust |
 | Keystrokes | `keybd_event` FFI / `osascript` / `xdotool` | `enigo` (one backend) |
 | Cursor input | overlay captures mouse | global polling (`device_query`) |
-| Sound | Electron `Audio` | `rodio`, clips embedded in the binary |
+| Sound | Electron `Audio` | `rodio`, clips embedded (or your own files) |
 
 ## Credits
 

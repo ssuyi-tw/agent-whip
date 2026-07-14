@@ -4,6 +4,7 @@
 //! The file is created with sensible defaults on first run and re-read whenever
 //! it changes on disk, so edits apply on the next crack — no restart.
 
+use crate::logging::log;
 use rand::RngExt;
 use serde::Deserialize;
 use std::path::PathBuf;
@@ -18,25 +19,20 @@ pub struct Config {
     pub send_interrupt: bool,
     /// Press Enter after typing.
     pub send_enter: bool,
+    /// Custom crack sound files (absolute or `~/…`); one is picked at random
+    /// per crack. Empty = use the embedded clips.
+    pub sounds: Vec<String>,
 }
 
 impl Default for Config {
     fn default() -> Self {
         Config {
-            phrases: [
-                "FASTER",
-                "FASTER",
-                "FASTER",
-                "GO FASTER",
-                "Faster CLANKER",
-                "Work FASTER",
-                "Speed it up clanker",
-            ]
-            .iter()
-            .map(|s| s.to_string())
-            .collect(),
-            send_interrupt: true,
+            // Default nudges the agent via Claude Code's `/btw`, which queues a
+            // note WITHOUT interrupting the running turn — hence send_interrupt off.
+            phrases: vec!["/btw hold on".to_string()],
+            send_interrupt: false,
             send_enter: true,
+            sounds: Vec::new(),
         }
     }
 }
@@ -45,18 +41,19 @@ impl Default for Config {
 const DEFAULT_TOML: &str = r#"# agent-whip config — edit and save; changes apply on the next crack.
 
 # Typed after the whip cracks. One line is picked at random each crack.
+# The default routes through Claude Code's /btw, which queues a note to the
+# agent WITHOUT interrupting the running turn — that's why send_interrupt is off.
 phrases = [
-  "FASTER",
-  "FASTER",
-  "FASTER",
-  "GO FASTER",
-  "Faster CLANKER",
-  "Work FASTER",
-  "Speed it up clanker",
+  "/btw hold on",
 ]
 
-send_interrupt = true   # send Ctrl-C before typing
+send_interrupt = false  # send Ctrl-C before typing (off: don't interrupt the turn)
 send_enter     = true   # press Enter after typing
+
+# Custom crack sounds — absolute paths or ~/…, one picked at random each crack.
+# Leave empty to use the five built-in clips. Any format rodio decodes
+# (wav, mp3, flac, ogg, …). Missing/unreadable files fall back to the built-ins.
+sounds = []
 "#;
 
 fn config_dir() -> Option<PathBuf> {
@@ -77,15 +74,25 @@ pub fn pid_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("agent-whip.pid"))
 }
 
+/// Expand a leading `~/` to `$HOME`; leave other paths untouched.
+fn expand_tilde(s: &str) -> PathBuf {
+    if let Some(rest) = s.strip_prefix("~/") {
+        if let Some(home) = std::env::var_os("HOME") {
+            return PathBuf::from(home).join(rest);
+        }
+    }
+    PathBuf::from(s)
+}
+
 fn parse(text: &str) -> Config {
     match toml::from_str::<Config>(text) {
         Ok(c) if !c.phrases.is_empty() => c,
         Ok(_) => {
-            eprintln!("agent-whip: config has no phrases; using defaults");
+            log!("agent-whip: config has no phrases; using defaults");
             Config::default()
         }
         Err(e) => {
-            eprintln!("agent-whip: config parse error ({e}); using defaults");
+            log!("agent-whip: config parse error ({e}); using defaults");
             Config::default()
         }
     }
@@ -104,14 +111,14 @@ impl ConfigFile {
         let path = config_path();
         if let Some(p) = &path {
             if p.exists() {
-                println!("agent-whip: config at {}", p.display());
+                log!("agent-whip: config at {}", p.display());
             } else {
                 if let Some(dir) = p.parent() {
                     let _ = std::fs::create_dir_all(dir);
                 }
                 match std::fs::write(p, DEFAULT_TOML) {
-                    Ok(()) => println!("agent-whip: wrote default config to {}", p.display()),
-                    Err(e) => eprintln!("agent-whip: could not write config ({e}); using defaults"),
+                    Ok(()) => log!("agent-whip: wrote default config to {}", p.display()),
+                    Err(e) => log!("agent-whip: could not write config ({e}); using defaults"),
                 }
             }
         }
@@ -153,5 +160,21 @@ impl ConfigFile {
             return String::new();
         }
         p[rand::rng().random_range(0..p.len())].clone()
+    }
+
+    /// A random configured sound file that exists on disk, or `None` to fall
+    /// back to the embedded clips.
+    pub fn pick_sound(&self) -> Option<PathBuf> {
+        let existing: Vec<PathBuf> = self
+            .current
+            .sounds
+            .iter()
+            .map(|s| expand_tilde(s))
+            .filter(|p| p.is_file())
+            .collect();
+        if existing.is_empty() {
+            return None;
+        }
+        Some(existing[rand::rng().random_range(0..existing.len())].clone())
     }
 }
