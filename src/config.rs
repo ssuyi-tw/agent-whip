@@ -59,12 +59,22 @@ send_interrupt = true   # send Ctrl-C before typing
 send_enter     = true   # press Enter after typing
 "#;
 
-fn config_path() -> Option<PathBuf> {
+fn config_dir() -> Option<PathBuf> {
     let base = std::env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
         .filter(|p| !p.as_os_str().is_empty())
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
-    Some(base.join("agent-whip").join("config.toml"))
+    Some(base.join("agent-whip"))
+}
+
+fn config_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("config.toml"))
+}
+
+/// Path to the pidfile the running instance writes, so an external command
+/// (`agent-whip whip`, a Raycast script) can signal it to summon the whip.
+pub fn pid_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("agent-whip.pid"))
 }
 
 fn parse(text: &str) -> Config {

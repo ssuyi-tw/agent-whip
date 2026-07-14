@@ -374,8 +374,41 @@ impl ApplicationHandler<UserEvent> for App {
     }
 }
 
+/// `agent-whip whip` — signal a running instance to summon (or drop) the whip.
+/// This is what the CLI command and the Raycast script call.
+#[cfg(unix)]
+fn run_whip_command() -> i32 {
+    let Some(pidfile) = config::pid_path() else {
+        eprintln!("agent-whip: can't locate the pidfile");
+        return 1;
+    };
+    let Ok(text) = std::fs::read_to_string(&pidfile) else {
+        eprintln!("agent-whip isn't running — launch AgentWhip first.");
+        return 1;
+    };
+    let pid = text.trim();
+    let ok = std::process::Command::new("kill")
+        .args(["-USR1", pid])
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if ok {
+        0
+    } else {
+        eprintln!("agent-whip: couldn't signal pid {pid} (not running? stale pidfile)");
+        1
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+
+    // Subcommand: `agent-whip whip` toggles a running instance, then exits.
+    #[cfg(unix)]
+    if args.iter().any(|a| a == "whip") {
+        std::process::exit(run_whip_command());
+    }
+
     let selftest = args.iter().any(|a| a == "--selftest");
     // Self-test never injects keystrokes.
     let dry_run = selftest || args.iter().any(|a| a == "--dry-run");
@@ -398,6 +431,35 @@ fn main() {
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let proxy = event_loop.create_proxy();
+
+    // Let external commands summon the whip: record our pid, and forward
+    // SIGUSR1 into the event loop as a toggle (same as a tray click).
+    #[cfg(unix)]
+    {
+        if let Some(p) = config::pid_path() {
+            if let Some(dir) = p.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            let _ = std::fs::write(&p, std::process::id().to_string());
+        }
+        let proxy = proxy.clone();
+        match signal_hook::iterator::Signals::new([signal_hook::consts::SIGUSR1]) {
+            Ok(mut signals) => {
+                std::thread::spawn(move || {
+                    for _ in signals.forever() {
+                        let _ = proxy.send_event(UserEvent::TrayToggle);
+                    }
+                });
+            }
+            Err(e) => eprintln!("agent-whip: could not install signal handler: {e}"),
+        }
+    }
+
     let mut app = App::new(proxy, dry_run, selftest);
     event_loop.run_app(&mut app).expect("run event loop");
+
+    #[cfg(unix)]
+    if let Some(p) = config::pid_path() {
+        let _ = std::fs::remove_file(p);
+    }
 }

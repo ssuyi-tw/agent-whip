@@ -50,6 +50,25 @@ scripts/pack-app.sh --install   # builds dist/AgentWhip.app and copies it to /Ap
 Then find **AgentWhip** in Raycast/Spotlight. (The app bundle's binary is a new
 identity, so macOS will ask for Accessibility again on first whip.)
 
+## Summon it without the tray icon
+
+The running app listens for a toggle signal, so you can crack the whip from
+anywhere — handy when the menu-bar icon is buried among other apps.
+
+**Command line** (put `agent-whip` on your PATH with `cargo install --path .`):
+
+```bash
+agent-whip whip                                     # summon / drop
+# …or with no PATH install:
+kill -USR1 "$(cat ~/.config/agent-whip/agent-whip.pid)"
+```
+
+**Raycast** — add this repo's `raycast/` folder as a script-command directory
+(Raycast → Settings → Extensions → Script Commands → *Add Script Directory*),
+then run **“Whip the agent.”** Assign it a Raycast hotkey/alias and you've got a
+global keyboard shortcut — no extra permissions, nothing baked into the app. If
+the app isn't running, the script launches it (run it again to whip).
+
 ## Permissions
 
 The whip needs to read the global cursor and synthesize keystrokes, so it
