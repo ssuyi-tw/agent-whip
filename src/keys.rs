@@ -9,22 +9,6 @@
 //! deferring `type_phrase`, not by sleeping here.
 
 use enigo::{Direction, Enigo, Key, Keyboard, Settings};
-use rand::RngExt;
-
-/// The five encouraging phrases (weighted toward "FASTER", as in the original).
-pub const PHRASES: [&str; 7] = [
-    "FASTER",
-    "FASTER",
-    "FASTER",
-    "GO FASTER",
-    "Faster CLANKER",
-    "Work FASTER",
-    "Speed it up clanker",
-];
-
-pub fn pick_phrase() -> &'static str {
-    PHRASES[rand::rng().random_range(0..PHRASES.len())]
-}
 
 /// Create the keystroke backend. `None` if unavailable (e.g. Accessibility not
 /// granted). Must be called on the main thread.
@@ -49,11 +33,14 @@ pub fn interrupt(enigo: &mut Enigo) {
     }
 }
 
-/// Type the phrase and press Enter. Main thread only.
-pub fn type_phrase(enigo: &mut Enigo, text: &str) {
+/// Type the phrase, optionally pressing Enter after. Main thread only.
+pub fn type_phrase(enigo: &mut Enigo, text: &str, send_enter: bool) {
     if let Err(e) = (|| -> Result<(), enigo::InputError> {
         enigo.text(text)?;
-        enigo.key(Key::Return, Direction::Click)
+        if send_enter {
+            enigo.key(Key::Return, Direction::Click)?;
+        }
+        Ok(())
     })() {
         eprintln!("agent-whip: type failed: {e}");
     }

@@ -5,6 +5,7 @@
 //! cracks — playing a sound and sending Ctrl-C + an encouraging phrase to
 //! whatever app you were using. Click (or click the tray again) to drop it.
 
+mod config;
 mod gpu;
 mod input;
 mod keys;
@@ -54,11 +55,13 @@ struct App {
     scale: f64,
     monitor_pos: (i32, i32),
     spawn_at: Option<Instant>,
+    /// User-editable crack config (phrases + toggles), reloaded on change.
+    cfg: config::ConfigFile,
     /// Keystroke backend — created lazily on the main thread on first crack.
     enigo: Option<enigo::Enigo>,
-    /// Deferred second half of the crack macro: type this phrase at this time
-    /// (the 300 ms gap after the interrupt), serviced on the main thread.
-    pending_type: Option<(Instant, &'static str)>,
+    /// Deferred second half of the crack macro: type this phrase (+ whether to
+    /// press Enter) at this time — the 300 ms gap after the interrupt.
+    pending_type: Option<(Instant, String, bool)>,
     /// Debug mode: auto-spawn and animate with a synthetic cursor, then exit.
     selftest: bool,
     tick: u64,
@@ -82,6 +85,7 @@ impl App {
             scale: 1.0,
             monitor_pos: (0, 0),
             spawn_at: None,
+            cfg: config::ConfigFile::init(),
             enigo: None,
             pending_type: None,
             selftest,
@@ -198,10 +202,17 @@ impl App {
     /// thread — enigo's macOS backend asserts it must.
     fn crack(&mut self, now: Instant) {
         self.sound.play_crack();
+        self.cfg.reload_if_changed();
+        let send_interrupt = self.cfg.send_interrupt();
+        let send_enter = self.cfg.send_enter();
+        let phrase = self.cfg.pick_phrase();
+
         if self.dry_run {
             println!(
-                "[dry-run] crack -> Ctrl-C + type {:?} + Enter",
-                keys::pick_phrase()
+                "[dry-run] crack -> {}type {:?}{}",
+                if send_interrupt { "Ctrl-C + " } else { "" },
+                phrase,
+                if send_enter { " + Enter" } else { "" }
             );
             return;
         }
@@ -209,20 +220,22 @@ impl App {
             self.enigo = keys::new_enigo();
         }
         if let Some(e) = &mut self.enigo {
-            keys::interrupt(e);
-            self.pending_type = Some((now + Duration::from_millis(300), keys::pick_phrase()));
+            if send_interrupt {
+                keys::interrupt(e);
+            }
+            self.pending_type = Some((now + Duration::from_millis(300), phrase, send_enter));
         }
     }
 
     /// Fire the deferred typed phrase once its time arrives. Returns whether one
     /// is still pending (so the loop keeps ticking until it fires).
     fn service_pending(&mut self, now: Instant) -> bool {
-        if let Some((at, phrase)) = self.pending_type {
-            if now >= at {
+        let due = matches!(&self.pending_type, Some((at, _, _)) if now >= *at);
+        if due {
+            if let Some((_, phrase, send_enter)) = self.pending_type.take() {
                 if let Some(e) = &mut self.enigo {
-                    keys::type_phrase(e, phrase);
+                    keys::type_phrase(e, &phrase, send_enter);
                 }
-                self.pending_type = None;
             }
         }
         self.pending_type.is_some()

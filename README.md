@@ -62,6 +62,30 @@ requires OS input access:
   (same caveat as the original's `xdotool`).
 - **Windows** — works out of the box.
 
+## Configure the crack prompt
+
+What the whip types after it cracks is read from a config file, created with
+defaults on first run and **re-read on every crack** — so edit, save, and the
+next crack uses it (no restart, no rebuild):
+
+```
+~/.config/agent-whip/config.toml      # or $XDG_CONFIG_HOME/agent-whip/config.toml
+```
+```toml
+# One line is picked at random each crack.
+phrases = [
+  "FASTER",
+  "GO FASTER",
+  "Work FASTER",
+  "Speed it up clanker",
+]
+
+send_interrupt = true   # send Ctrl-C before typing
+send_enter     = true   # press Enter after typing
+```
+
+If the file is missing or invalid, the built-in defaults are used.
+
 ## How this differs from OpenWhip
 
 | | OpenWhip | agent-whip |
