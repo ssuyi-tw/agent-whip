@@ -1,3 +1,5 @@
+<img src="assets/icon/agent_whip_icon_v2.png" width="120">
+
 # agent-whip
 
 Sometimes your coding agent is going too shlow, and you must whip it into shape.
