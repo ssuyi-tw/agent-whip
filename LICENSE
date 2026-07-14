@@ -1,6 +1,10 @@
 MIT License
 
-Copyright (c) 2026 Scott Ssuyi Huang
+Copyright (c) 2026 the agent-whip authors
+
+agent-whip is a Rust port of OpenWhip (https://github.com/GitFrog1111/OpenWhip),
+which is likewise MIT licensed. Portions of the whip physics and rendering are
+derived from that project.
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

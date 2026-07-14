@@ -1,0 +1,29 @@
+[package]
+name = "agent-whip"
+version = "0.1.0"
+edition = "2024"
+description = "Whip your coding agent into shape — a native Rust port of OpenWhip"
+license = "MIT"
+readme = "README.md"
+keywords = ["tray", "overlay", "whip", "cli"]
+categories = ["command-line-utilities"]
+
+[[bin]]
+name = "agent-whip"
+path = "src/main.rs"
+
+[profile.release]
+strip = true
+
+[dependencies]
+bytemuck = "1.25.1"
+device_query = "4.0.1"
+enigo = "0.6.1"
+image = "0.25.10"
+pollster = "1.0.1"
+rand = "0.10.2"
+rodio = "0.22.2"
+tiny-skia = "0.12.0"
+tray-icon = "0.24.1"
+wgpu = "30.0.0"
+winit = "0.30.13"
