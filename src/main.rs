@@ -14,10 +14,12 @@ mod logging;
 mod render;
 mod sound;
 mod tray;
+mod update;
 mod whip;
 
 use logging::log;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -39,6 +41,8 @@ pub enum UserEvent {
     ToggleAction,
     /// Toggle the crack sound.
     ToggleSound,
+    /// Check GitHub for a newer release and offer to install it.
+    CheckUpdate,
     Quit,
 }
 
@@ -77,6 +81,8 @@ struct App {
     action_enabled: bool,
     /// Whether a crack plays a sound (toggled from the tray menu).
     sound_enabled: bool,
+    /// Set while an update check/install is running, so we don't start a second.
+    updating: Arc<AtomicBool>,
 }
 
 impl App {
@@ -104,7 +110,24 @@ impl App {
             tick: 0,
             action_enabled: true,
             sound_enabled: true,
+            updating: Arc::new(AtomicBool::new(false)),
         }
+    }
+
+    /// Run an update check (and, if the user agrees, install) on a background
+    /// thread so the network/download work never blocks the overlay or tray.
+    /// `silent` suppresses the up-to-date / error notices used by the launch
+    /// check. A check already in flight is a no-op.
+    fn spawn_update_check(&self, silent: bool) {
+        if self.updating.swap(true, Ordering::SeqCst) {
+            return;
+        }
+        let proxy = self.proxy.clone();
+        let flag = self.updating.clone();
+        std::thread::spawn(move || {
+            run_update_flow(&proxy, silent);
+            flag.store(false, Ordering::SeqCst);
+        });
     }
 
     fn ensure_window(&mut self, el: &ActiveEventLoop) {
@@ -284,6 +307,10 @@ impl ApplicationHandler<UserEvent> for App {
         self.ensure_window(el);
         if self.tray.is_none() {
             self.tray = Some(tray::build(self.proxy.clone()));
+            // Check for a newer release once on startup (per Terry's request).
+            if !self.selftest {
+                self.spawn_update_check(true);
+            }
         }
         if self.selftest {
             let (cx, cy) = (self.sim.w * 0.5, self.sim.h * 0.5);
@@ -315,6 +342,7 @@ impl ApplicationHandler<UserEvent> for App {
                 self.sound_enabled = !self.sound_enabled;
                 log!("agent-whip: sound {}", on_off(self.sound_enabled));
             }
+            UserEvent::CheckUpdate => self.spawn_update_check(false),
         }
     }
 
@@ -417,6 +445,53 @@ fn on_off(b: bool) -> &'static str {
     } else {
         "off"
     }
+}
+
+/// The update pipeline, run on a background thread: check GitHub, and if a newer
+/// release exists, ask to install it, download + verify the DMG, hand off to the
+/// detached installer, and quit so it can swap the app and relaunch.
+fn run_update_flow(proxy: &EventLoopProxy<UserEvent>, silent: bool) {
+    let current = env!("CARGO_PKG_VERSION");
+    let rel = match update::latest() {
+        Ok(r) => r,
+        Err(e) => {
+            log!("agent-whip: update check failed: {e}");
+            if !silent {
+                update::alert(&format!("Couldn't check for updates.\n\n{e}"));
+            }
+            return;
+        }
+    };
+    if !update::is_newer(&rel.version, current) {
+        log!("agent-whip: up to date (v{current})");
+        if !silent {
+            update::notify(&format!("AgentWhip is up to date (v{current})."));
+        }
+        return;
+    }
+    log!("agent-whip: update available v{current} -> v{}", rel.version);
+    if !update::confirm(&format!(
+        "AgentWhip v{} is available — you have v{current}.\n\n\
+         Download and install it now? The app will relaunch.",
+        rel.version
+    )) {
+        return;
+    }
+    let dmg = match update::download(&rel) {
+        Ok(p) => p,
+        Err(e) => {
+            log!("agent-whip: update download failed: {e}");
+            update::alert(&format!("Update download failed.\n\n{e}"));
+            return;
+        }
+    };
+    if let Err(e) = update::spawn_installer(&dmg) {
+        log!("agent-whip: could not start installer: {e}");
+        update::alert(&format!("Couldn't start the installer.\n\n{e}"));
+        return;
+    }
+    update::notify("Installing update… AgentWhip will relaunch.");
+    let _ = proxy.send_event(UserEvent::Quit);
 }
 
 /// `agent-whip whip` — signal a running instance to summon (or drop) the whip.
