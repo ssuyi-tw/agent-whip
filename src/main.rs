@@ -35,6 +35,10 @@ use whip::{Params, Sim};
 #[derive(Debug, Clone, Copy)]
 pub enum UserEvent {
     TrayToggle,
+    /// Toggle the crack "action" — the Ctrl-C + typed-phrase keystroke macro.
+    ToggleAction,
+    /// Toggle the crack sound.
+    ToggleSound,
     Quit,
 }
 
@@ -69,6 +73,10 @@ struct App {
     /// Debug mode: auto-spawn and animate with a synthetic cursor, then exit.
     selftest: bool,
     tick: u64,
+    /// Whether a crack fires the keystroke macro (toggled from the tray menu).
+    action_enabled: bool,
+    /// Whether a crack plays a sound (toggled from the tray menu).
+    sound_enabled: bool,
 }
 
 impl App {
@@ -94,6 +102,8 @@ impl App {
             pending_type: None,
             selftest,
             tick: 0,
+            action_enabled: true,
+            sound_enabled: true,
         }
     }
 
@@ -206,8 +216,20 @@ impl App {
     /// thread — enigo's macOS backend asserts it must.
     fn crack(&mut self, now: Instant) {
         self.cfg.reload_if_changed();
-        let sound = self.cfg.pick_sound();
-        self.sound.play_crack(sound);
+
+        if self.sound_enabled {
+            let sound = self.cfg.pick_sound();
+            self.sound.play_crack(sound);
+        }
+
+        // The keystroke macro is the "action"; the tray menu can switch it off.
+        if !self.action_enabled {
+            if self.dry_run {
+                log!("[dry-run] crack -> action off (no keystrokes)");
+            }
+            return;
+        }
+
         let send_interrupt = self.cfg.send_interrupt();
         let send_enter = self.cfg.send_enter();
         let phrase = self.cfg.pick_phrase();
@@ -283,6 +305,16 @@ impl ApplicationHandler<UserEvent> for App {
         match ev {
             UserEvent::Quit => el.exit(),
             UserEvent::TrayToggle => self.toggle(el),
+            // The tray checkmark already flipped (muda toggles it on click); keep
+            // our flag in lockstep with it.
+            UserEvent::ToggleAction => {
+                self.action_enabled = !self.action_enabled;
+                log!("agent-whip: action {}", on_off(self.action_enabled));
+            }
+            UserEvent::ToggleSound => {
+                self.sound_enabled = !self.sound_enabled;
+                log!("agent-whip: sound {}", on_off(self.sound_enabled));
+            }
         }
     }
 
@@ -376,6 +408,14 @@ impl ApplicationHandler<UserEvent> for App {
             w.request_redraw();
         }
         el.set_control_flow(ControlFlow::WaitUntil(now + FRAME));
+    }
+}
+
+fn on_off(b: bool) -> &'static str {
+    if b {
+        "on"
+    } else {
+        "off"
     }
 }
 

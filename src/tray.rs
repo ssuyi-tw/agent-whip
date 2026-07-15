@@ -1,9 +1,10 @@
 //! System-tray icon + menu (ports the Electron `Tray`). Left-click spawns/drops
-//! the whip; right-click opens a menu with Quit. Tray and menu events are
-//! forwarded into the winit event loop as [`UserEvent`]s.
+//! the whip; right-click opens a menu to toggle the crack action/sound and Quit.
+//! Tray and menu events are forwarded into the winit event loop as
+//! [`UserEvent`]s.
 
 use crate::UserEvent;
-use tray_icon::menu::{Menu, MenuEvent, MenuItem};
+use tray_icon::menu::{CheckMenuItem, Menu, MenuEvent, MenuItem, PredefinedMenuItem};
 use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent};
 use winit::event_loop::EventLoopProxy;
 
@@ -25,18 +26,35 @@ pub fn build(proxy: EventLoopProxy<UserEvent>) -> Tray {
     let icon = Icon::from_rgba(img.into_raw(), w, h).expect("build tray icon");
 
     let menu = Menu::new();
+    // Both toggles start enabled. muda flips the checkmark itself on click; the
+    // app keeps a matching flag in lockstep (see UserEvent::Toggle*), so we don't
+    // need to hold on to these item handles.
+    let action = CheckMenuItem::new("Send prompt on crack", true, true, None);
+    let sound = CheckMenuItem::new("Play sound on crack", true, true, None);
     let quit = MenuItem::new("Quit", true, None);
+    menu.append(&action).expect("append action item");
+    menu.append(&sound).expect("append sound item");
+    menu.append(&PredefinedMenuItem::separator())
+        .expect("append separator");
     menu.append(&quit).expect("append quit item");
+    let action_id = action.id().clone();
+    let sound_id = sound.id().clone();
     let quit_id = quit.id().clone();
 
     // Forward menu selections.
     {
         let proxy = proxy.clone();
-        let quit_id = quit_id.clone();
         MenuEvent::set_event_handler(Some(move |e: MenuEvent| {
-            if e.id == quit_id {
-                let _ = proxy.send_event(UserEvent::Quit);
-            }
+            let ev = if e.id == action_id {
+                UserEvent::ToggleAction
+            } else if e.id == sound_id {
+                UserEvent::ToggleSound
+            } else if e.id == quit_id {
+                UserEvent::Quit
+            } else {
+                return;
+            };
+            let _ = proxy.send_event(ev);
         }));
     }
 
