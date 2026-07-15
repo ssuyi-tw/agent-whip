@@ -117,7 +117,9 @@ impl App {
         if self.window.is_some() {
             return;
         }
-        let monitor = el.primary_monitor().or_else(|| el.available_monitors().next());
+        let monitor = el
+            .primary_monitor()
+            .or_else(|| el.available_monitors().next());
         let (pos, size) = match &monitor {
             Some(m) => (m.position(), m.size()),
             None => (PhysicalPosition::new(0, 0), PhysicalSize::new(1280, 800)),
@@ -431,11 +433,7 @@ impl ApplicationHandler<UserEvent> for App {
 }
 
 fn on_off(b: bool) -> &'static str {
-    if b {
-        "on"
-    } else {
-        "off"
-    }
+    if b { "on" } else { "off" }
 }
 
 /// `agent-whip whip` — signal a running instance to summon (or drop) the whip.

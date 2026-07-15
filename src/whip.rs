@@ -387,8 +387,8 @@ fn apply_bend_limits(pts: &mut [Point], p: &Params) {
         let dot = clamp(n1x * n2x + n1y * n2y, -1.0, 1.0);
         let angle = dot.acos();
         let t = i as f32 / (n - 2) as f32;
-        let max_bend = lerp(p.handle_max_bend_deg, p.tip_max_bend_deg, t) * std::f32::consts::PI
-            / 180.0;
+        let max_bend =
+            lerp(p.handle_max_bend_deg, p.tip_max_bend_deg, t) * std::f32::consts::PI / 180.0;
         let bend = std::f32::consts::PI - angle;
         if bend <= max_bend {
             continue;

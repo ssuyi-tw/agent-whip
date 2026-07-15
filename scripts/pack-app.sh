@@ -15,11 +15,9 @@ SRC_ICON="assets/icon/whip-appicon.png"
 SPARKLE_VERSION="2.9.4"
 SPARKLE_SHA256="ce89daf967db1e1893ed3ebd67575ed82d3902563e3191ca92aaec9164fbdef9"
 SU_FEED_URL="${SU_FEED_URL:-https://raw.githubusercontent.com/ssuyi-tw/agent-whip/main/appcast.xml}"
-# EdDSA public key Sparkle uses to verify updates. This default is a PLACEHOLDER
-# (valid format, not a real key) so local dev builds start cleanly — updates
-# signed with the real key will NOT verify against it. For releases, the signer
-# sets SU_PUBLIC_ED_KEY to the real public key.
-SU_PUBLIC_ED_KEY="${SU_PUBLIC_ED_KEY:-RT2BM5GHJz/lKwhtZDw4f0RSGMhXm55Lm1A7tJlKzzk=}"
+# EdDSA public key Sparkle uses to verify updates. The matching private key is
+# held in the release signer's login Keychain and never committed.
+SU_PUBLIC_ED_KEY="${SU_PUBLIC_ED_KEY:-vgQi3/mkxj1gBBBfZfK31gfEUCtg2ymVGZxDQn5XOBU=}"
 
 echo "==> building release binary"
 cargo build --release

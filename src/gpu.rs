@@ -216,8 +216,7 @@ impl Gpu {
         });
 
         let texture = create_texture(&device, size);
-        let bind_group =
-            create_bind_group(&device, &layout, &texture, &sampler, &mode_buf);
+        let bind_group = create_bind_group(&device, &layout, &texture, &sampler, &mode_buf);
 
         Gpu {
             surface,
@@ -289,7 +288,9 @@ impl Gpu {
             // Timeout / Occluded / validation error — skip this frame.
             _ => return,
         };
-        let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let view = frame
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {

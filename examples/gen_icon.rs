@@ -178,7 +178,13 @@ fn main() {
     );
     // rounded corners via a simple rounded-rect path
     let mut rrb = PathBuilder::new();
-    let (l, t, r, b, rad) = (margin, margin, size as f32 - margin, size as f32 - margin, 180.0);
+    let (l, t, r, b, rad) = (
+        margin,
+        margin,
+        size as f32 - margin,
+        size as f32 - margin,
+        180.0,
+    );
     rrb.move_to(l + rad, t);
     rrb.line_to(r - rad, t);
     rrb.quad_to(r, t, r, t + rad);
@@ -193,7 +199,11 @@ fn main() {
     if let Some(path) = rrb.finish() {
         pm.fill_path(&path, &bg, FillRule::Winding, Transform::identity(), None);
     }
-    draw_whip(&mut pm, Transform::identity(), Color::from_rgba8(20, 20, 20, 255));
+    draw_whip(
+        &mut pm,
+        Transform::identity(),
+        Color::from_rgba8(20, 20, 20, 255),
+    );
     pm.save_png("/tmp/whip_appicon_1024.png").unwrap();
     println!("wrote /tmp/whip_appicon_1024.png");
 }

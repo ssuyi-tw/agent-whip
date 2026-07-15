@@ -1,0 +1,15 @@
+<?xml version="1.0" standalone="yes"?>
+<rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
+    <channel>
+        <title>AgentWhip</title>
+        <item>
+            <title>0.3.0</title>
+            <pubDate>Wed, 15 Jul 2026 21:34:49 +0800</pubDate>
+            <sparkle:version>0.3.0</sparkle:version>
+            <sparkle:shortVersionString>0.3.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/ssuyi-tw/agent-whip/releases/download/v0.3.0/AgentWhip-0.3.0.dmg" length="8234268" type="application/octet-stream" sparkle:edSignature="e2JfPK12izalp5AY3PIl0P4QR7kJ2ixzKISBiITW/Bz0PSI1GkpYO1N+dWD/yBDaP4Ca0/rGYTKgN3in22F8BA=="/>
+        </item>
+    </channel>
+</rss>
