@@ -3,6 +3,15 @@
     <channel>
         <title>AgentWhip</title>
         <item>
+            <title>0.3.1</title>
+            <pubDate>Wed, 15 Jul 2026 21:54:13 +0800</pubDate>
+            <sparkle:version>0.3.1</sparkle:version>
+            <sparkle:shortVersionString>0.3.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/ssuyi-tw/agent-whip/releases/download/v0.3.1/AgentWhip-0.3.1.dmg" length="9313883" type="application/octet-stream" sparkle:edSignature="rc3zEt0QxAPX+2FUixQ6pr0X3A9C7CAZZoQpusGZb+1Wi9+aZmu3YfiRLCr9vvY0AisTVW1Bwc54TUDOEt/6Bw=="/>
+        </item>
+        <item>
             <title>0.3.0</title>
             <pubDate>Wed, 15 Jul 2026 21:34:49 +0800</pubDate>
             <sparkle:version>0.3.0</sparkle:version>
