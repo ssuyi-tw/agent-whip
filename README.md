@@ -27,6 +27,21 @@ were just using. By default it types `/btw hold on`, which nudges Claude Code
   `/btw hold on` (a non-interrupting Claude Code nudge); the phrase set, the
   optional `Ctrl-C`, and the sounds are all configurable (see below).
 
+## Install with Homebrew
+
+The easiest way — installs the notarized app **and** puts the `agent-whip` CLI
+on your `PATH` (no `sudo`):
+
+```bash
+brew install --cask ssuyi-tw/tap/agent-whip
+
+agent-whip --version
+agent-whip whip          # summon / drop the whip on the running app
+```
+
+The app keeps itself up to date via Sparkle, so `brew upgrade` leaves it alone.
+To remove everything (app, CLI, config, caches): `brew uninstall --zap --cask agent-whip`.
+
 ## Build & run
 
 Requires a Rust toolchain (`rustup`, stable).
