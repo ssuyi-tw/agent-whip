@@ -46,13 +46,15 @@ if [[ -n "${DEVID:-}" ]]; then
   SIGNED=1
   echo "==> signing with: $DEVID"
   # Hardened runtime + secure timestamp are required for notarization. The
-  # bundle is a single Mach-O plus resources, so signing it signs everything.
-  codesign --force --options runtime --timestamp --sign "$DEVID" "$APP"
+  # bundle embeds Sparkle.framework, so sign inside-out (nested helpers, the
+  # framework, then the app) — re-signing the framework with our own identity is
+  # what lets it pass library validation under the hardened runtime.
+  scripts/sign-bundle.sh "$APP" "$DEVID" runtime
 else
   SIGNED=0
   echo "==> no Developer ID found — ad-hoc signing (DMG will need right-click → Open)"
   echo "    Get one via the Apple Developer Program, then re-run. See the header of this script."
-  codesign --force --sign - "$APP"
+  scripts/sign-bundle.sh "$APP" -
 fi
 
 echo "==> verifying app signature"
