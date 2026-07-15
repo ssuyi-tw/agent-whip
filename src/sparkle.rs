@@ -102,6 +102,9 @@ fn load_framework() -> Option<()> {
 /// Absolute path to the Sparkle binary inside this app bundle, if present.
 fn framework_binary_path() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
+    // Resolve symlinks (e.g. Homebrew's `bin/agent-whip` -> the real bundle) so
+    // we look beside the actual executable, not beside the symlink.
+    let exe = std::fs::canonicalize(&exe).unwrap_or(exe);
     // exe: <App>.app/Contents/MacOS/agent-whip -> Contents is two levels up.
     let contents = exe.parent()?.parent()?;
     let fw = contents.join("Frameworks/Sparkle.framework/Versions/B/Sparkle");
