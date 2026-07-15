@@ -31,16 +31,19 @@ pub fn build(proxy: EventLoopProxy<UserEvent>) -> Tray {
     // need to hold on to these item handles.
     let action = CheckMenuItem::new("Send prompt on crack", true, true, None);
     let sound = CheckMenuItem::new("Play sound on crack", true, true, None);
+    let about = MenuItem::new("About agent-whip", true, None);
     let check_update = MenuItem::new("Check for Update", true, None);
     let quit = MenuItem::new("Quit", true, None);
     menu.append(&action).expect("append action item");
     menu.append(&sound).expect("append sound item");
     menu.append(&PredefinedMenuItem::separator())
         .expect("append separator");
+    menu.append(&about).expect("append about item");
     menu.append(&check_update).expect("append update item");
     menu.append(&quit).expect("append quit item");
     let action_id = action.id().clone();
     let sound_id = sound.id().clone();
+    let about_id = about.id().clone();
     let check_update_id = check_update.id().clone();
     let quit_id = quit.id().clone();
 
@@ -52,6 +55,8 @@ pub fn build(proxy: EventLoopProxy<UserEvent>) -> Tray {
                 UserEvent::ToggleAction
             } else if e.id == sound_id {
                 UserEvent::ToggleSound
+            } else if e.id == about_id {
+                UserEvent::ShowAbout
             } else if e.id == check_update_id {
                 UserEvent::CheckUpdate
             } else if e.id == quit_id {

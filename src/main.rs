@@ -42,6 +42,8 @@ pub enum UserEvent {
     ToggleSound,
     /// Check GitHub for a newer release and offer to install it.
     CheckUpdate,
+    /// Show a small dialog with the app version (tray "About" item).
+    ShowAbout,
     Quit,
 }
 
@@ -336,6 +338,7 @@ impl ApplicationHandler<UserEvent> for App {
                     u.check_for_updates();
                 }
             }
+            UserEvent::ShowAbout => show_about(),
         }
     }
 
@@ -436,6 +439,23 @@ fn on_off(b: bool) -> &'static str {
     if b { "on" } else { "off" }
 }
 
+/// Pop a small native dialog showing the version (tray "About" item). Runs the
+/// dialog on a background thread so the event loop keeps ticking while it's open.
+fn show_about() {
+    let msg = format!("agent-whip v{}", env!("CARGO_PKG_VERSION"));
+    log!("{msg}");
+    #[cfg(target_os = "macos")]
+    std::thread::spawn(move || {
+        let script = format!(
+            "display dialog \"{msg}\" with title \"agent-whip\" \
+             buttons {{\"OK\"}} default button \"OK\""
+        );
+        let _ = std::process::Command::new("osascript")
+            .args(["-e", &script])
+            .status();
+    });
+}
+
 /// `agent-whip whip` — signal a running instance to summon (or drop) the whip.
 /// This is what the CLI command and the Raycast script call.
 #[cfg(unix)]
@@ -464,6 +484,12 @@ fn run_whip_command() -> i32 {
 
 fn main() {
     let args: Vec<String> = std::env::args().collect();
+
+    // `agent-whip --version` prints the version and exits.
+    if args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("agent-whip {}", env!("CARGO_PKG_VERSION"));
+        return;
+    }
 
     // Subcommand: `agent-whip whip` toggles a running instance, then exits.
     #[cfg(unix)]

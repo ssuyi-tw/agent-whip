@@ -1,6 +1,6 @@
 [package]
 name = "agent-whip"
-version = "0.3.1"
+version = "0.3.2"
 edition = "2024"
 description = "Whip your coding agent into shape — a native Rust port of OpenWhip"
 license = "MIT"
