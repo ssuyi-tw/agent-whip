@@ -14,12 +14,16 @@ path = "src/main.rs"
 
 [profile.release]
 strip = true
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
 
 [dependencies]
 bytemuck = "1.25.1"
 device_query = "4.0.1"
 enigo = "0.6.1"
-image = "0.25.10"
+image = { version = "0.25.10", default-features = false, features = ["png"] }
 objc2 = "0.6.2"
 pollster = "1.0.1"
 rand = "0.10.2"
