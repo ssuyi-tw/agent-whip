@@ -12,6 +12,7 @@ mod input;
 mod keys;
 mod logging;
 mod render;
+mod skins;
 mod sound;
 mod sparkle;
 mod tray;
@@ -40,6 +41,10 @@ pub enum UserEvent {
     ToggleAction,
     /// Toggle the crack sound.
     ToggleSound,
+    /// Toggle the Guanzhang RRRRR roar layered over the crack.
+    ToggleRoar,
+    /// Pick a whip skin by index into `App::skins`.
+    SetSkin(usize),
     /// Check GitHub for a newer release and offer to install it.
     CheckUpdate,
     /// Show a small dialog with the app version (tray "About" item).
@@ -82,12 +87,20 @@ struct App {
     action_enabled: bool,
     /// Whether a crack plays a sound (toggled from the tray menu).
     sound_enabled: bool,
+    /// Whether the Guanzhang RRRRR roar is layered over the crack (tray toggle).
+    roar_enabled: bool,
+    /// Available whip skins and the index of the selected one (tray "Skin"
+    /// submenu; the choice is persisted across restarts).
+    skins: Vec<skins::Skin>,
+    skin_idx: usize,
     /// Sparkle auto-updater; `None` if the framework isn't embedded.
     updater: Option<sparkle::Updater>,
 }
 
 impl App {
     fn new(proxy: EventLoopProxy<UserEvent>, dry_run: bool, selftest: bool) -> Self {
+        let skins = skins::all();
+        let skin_idx = skins::index_of(&skins::load_selected_id());
         App {
             proxy,
             dry_run,
@@ -111,6 +124,9 @@ impl App {
             tick: 0,
             action_enabled: true,
             sound_enabled: true,
+            roar_enabled: true,
+            skins,
+            skin_idx,
             updater: None,
         }
     }
@@ -229,7 +245,7 @@ impl App {
 
         if self.sound_enabled {
             let sound = self.cfg.pick_sound();
-            self.sound.play_crack(sound);
+            self.sound.play_crack(sound, self.roar_enabled);
         }
 
         // The keystroke macro is the "action"; the tray menu can switch it off.
@@ -283,7 +299,7 @@ impl App {
             return;
         }
         if let (Some(g), Some(pm)) = (&mut self.gpu, &mut self.pixmap) {
-            render::draw(pm, &self.sim, &self.rp);
+            render::draw(pm, &self.sim, &self.rp, &self.skins[self.skin_idx]);
             g.render(pm.data());
         }
     }
@@ -293,7 +309,7 @@ impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         self.ensure_window(el);
         if self.tray.is_none() {
-            self.tray = Some(tray::build(self.proxy.clone()));
+            self.tray = Some(tray::build(self.proxy.clone(), &self.skins, self.skin_idx));
             // Start Sparkle and do one silent background check on launch (per
             // Terry's request). Sparkle also runs its own scheduled checks.
             if !self.selftest {
@@ -332,6 +348,26 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::ToggleSound => {
                 self.sound_enabled = !self.sound_enabled;
                 log!("agent-whip: sound {}", on_off(self.sound_enabled));
+            }
+            UserEvent::ToggleRoar => {
+                self.roar_enabled = !self.roar_enabled;
+                log!("agent-whip: RRRRR roar {}", on_off(self.roar_enabled));
+            }
+            UserEvent::SetSkin(idx) => {
+                if idx < self.skins.len() {
+                    self.skin_idx = idx;
+                    let id = self.skins[idx].id;
+                    skins::save_selected_id(id);
+                    if let Some(t) = &self.tray {
+                        t.select_skin(idx);
+                    }
+                    log!("agent-whip: skin -> {id}");
+                    if self.visible
+                        && let Some(w) = &self.window
+                    {
+                        w.request_redraw();
+                    }
+                }
             }
             UserEvent::CheckUpdate => {
                 if let Some(u) = &self.updater {
@@ -482,6 +518,44 @@ fn run_whip_command() -> i32 {
     }
 }
 
+/// Render a static whip pose in the named skin to a PNG, composited over a dark
+/// background so black-leather skins are visible. A dev/preview tool, not part
+/// of normal use. Returns a process exit code.
+fn render_skin_to_png(id: &str, out: &str) -> i32 {
+    let skins = skins::all();
+    let skin = skins[skins::index_of(id)];
+    let (w, h) = (620u32, 380u32);
+
+    let mut sim = Sim::new(Params::default());
+    sim.resize(w as f32, h as f32);
+    sim.spawn(130.0, h as f32 * 0.74, Instant::now());
+
+    let (Some(mut whip_pm), Some(mut pm)) = (Pixmap::new(w, h), Pixmap::new(w, h)) else {
+        eprintln!("render-skin: could not allocate pixmap");
+        return 1;
+    };
+    render::draw(&mut whip_pm, &sim, &RenderParams::default(), &skin);
+    pm.fill(tiny_skia::Color::from_rgba8(18, 10, 10, 255));
+    pm.draw_pixmap(
+        0,
+        0,
+        whip_pm.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        tiny_skia::Transform::identity(),
+        None,
+    );
+    match pm.save_png(out) {
+        Ok(()) => {
+            println!("wrote {out} ({})", skin.id);
+            0
+        }
+        Err(e) => {
+            eprintln!("render-skin: {e}");
+            1
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -495,6 +569,14 @@ fn main() {
     #[cfg(unix)]
     if args.iter().any(|a| a == "whip") {
         std::process::exit(run_whip_command());
+    }
+
+    // Dev/preview: `agent-whip render-skin <id> <out.png>` renders a static whip
+    // pose in the given skin to a PNG (no window, no tray), then exits.
+    if let Some(pos) = args.iter().position(|a| a == "render-skin") {
+        let id = args.get(pos + 1).map(String::as_str).unwrap_or("notorious");
+        let out = args.get(pos + 2).map(String::as_str).unwrap_or("skin.png");
+        std::process::exit(render_skin_to_png(id, out));
     }
 
     let selftest = args.iter().any(|a| a == "--selftest");

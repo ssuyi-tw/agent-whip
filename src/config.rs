@@ -74,6 +74,12 @@ pub fn pid_path() -> Option<PathBuf> {
     config_dir().map(|d| d.join("agent-whip.pid"))
 }
 
+/// Path to the one-line file holding the selected whip skin id. Kept separate
+/// from `config.toml` so tray edits never clobber the user's commented config.
+pub fn skin_path() -> Option<PathBuf> {
+    config_dir().map(|d| d.join("skin"))
+}
+
 /// Expand a leading `~/` to `$HOME`; leave other paths untouched.
 fn expand_tilde(s: &str) -> PathBuf {
     if let Some(rest) = s.strip_prefix("~/") {
