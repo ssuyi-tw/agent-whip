@@ -269,7 +269,7 @@ fn draw_tube(pixmap: &mut Pixmap, pts: &[Point], rp: &RenderParams, skin: &Skin)
         }
 
         if let Some(braid) = skin.braid {
-            draw_braid_tick(pixmap, (mx, my), (dx, dy), w, i, braid);
+            draw_braid_tick(pixmap, (mx, my), (dx, dy), w, braid);
         }
     }
 
@@ -283,29 +283,22 @@ fn draw_tube(pixmap: &mut Pixmap, pts: &[Point], rp: &RenderParams, skin: &Skin)
     }
 }
 
-/// A short diagonal braid tick at a segment midpoint `mid`, alternating
-/// direction. `d` is the segment's direction vector.
-fn draw_braid_tick(
-    pixmap: &mut Pixmap,
-    mid: (f32, f32),
-    d: (f32, f32),
-    w: f32,
-    i: usize,
-    braid: Braid,
-) {
-    let ta = d.1.atan2(d.0) + if i % 2 == 1 { 0.7 } else { -0.7 };
-    let l = w * 0.85;
-    let mut pb = PathBuilder::new();
-    pb.move_to(mid.0 - ta.cos() * l, mid.1 - ta.sin() * l);
-    pb.line_to(mid.0 + ta.cos() * l, mid.1 + ta.sin() * l);
-    if let Some(path) = pb.finish() {
-        pixmap.stroke_path(
-            &path,
-            &solid(with_alpha(braid.color, braid.alpha)),
-            &stroke((w * 0.16).max(1.5)),
-            Transform::identity(),
-            None,
-        );
+/// A crossed braid stitch (an `X`) at a segment midpoint `mid`, giving the woven
+/// leather look — chained down the rope the X's read as a diamond weave. `d` is
+/// the segment's direction vector.
+fn draw_braid_tick(pixmap: &mut Pixmap, mid: (f32, f32), d: (f32, f32), w: f32, braid: Braid) {
+    let base = d.1.atan2(d.0);
+    let l = w * 0.8;
+    let paint = solid(with_alpha(braid.color, braid.alpha));
+    let width = (w * 0.16).max(1.5);
+    for sign in [1.0f32, -1.0] {
+        let ta = base + sign * 0.7;
+        let mut pb = PathBuilder::new();
+        pb.move_to(mid.0 - ta.cos() * l, mid.1 - ta.sin() * l);
+        pb.line_to(mid.0 + ta.cos() * l, mid.1 + ta.sin() * l);
+        if let Some(path) = pb.finish() {
+            pixmap.stroke_path(&path, &paint, &stroke(width), Transform::identity(), None);
+        }
     }
 }
 
@@ -315,7 +308,7 @@ fn draw_glow(pixmap: &mut Pixmap, pts: &[Point], glow: Glow, base_width: f32) {
     let Some(path) = spline_path(pts, pts.len() - 1) else {
         return;
     };
-    for (mult, alpha) in [(2.2f32, 0.05f32), (1.3, 0.09), (0.6, 0.16)] {
+    for (mult, alpha) in [(1.0f32, 0.06f32), (0.55, 0.11), (0.25, 0.17)] {
         pixmap.stroke_path(
             &path,
             &solid(with_alpha(glow.color, alpha)),
@@ -328,7 +321,7 @@ fn draw_glow(pixmap: &mut Pixmap, pts: &[Point], glow: Glow, base_width: f32) {
 
 /// A glowing seam dot: translucent halo rings + a solid centre.
 fn draw_seam_dot(pixmap: &mut Pixmap, x: f32, y: f32, seam: Seam) {
-    for (mult, alpha) in [(0.9f32, 0.06f32), (0.5, 0.12), (0.22, 0.22)] {
+    for (mult, alpha) in [(0.55f32, 0.07f32), (0.3, 0.13), (0.14, 0.22)] {
         if let Some(path) = PathBuilder::from_circle(x, y, seam.size + seam.blur * mult) {
             let p = solid(with_alpha(seam.color, alpha));
             pixmap.fill_path(&path, &p, FillRule::Winding, Transform::identity(), None);

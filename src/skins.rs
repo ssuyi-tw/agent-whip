@@ -96,23 +96,25 @@ pub fn all() -> Vec<Skin> {
             kind: SkinType::Tube,
             core: rgb(0x111111),
             outline: rgb(0xffffff),
-            edge: Some(rgb(0x050505)),
-            shadow: rgb(0x160a05),
-            mid: rgb(0x3c1d10),
-            highlight: rgb(0x8a4526),
+            // Near-black leather with only a warm sheen in the highlight, so the
+            // red seams/glow read as light through the weave rather than colour.
+            edge: Some(rgb(0x040404)),
+            shadow: rgb(0x0c0605),
+            mid: rgb(0x22140f),
+            highlight: rgb(0x6a3320),
             glow: Some(Glow {
                 color: rgb(0xff2a2a),
-                blur: 8.0,
+                blur: 6.0,
             }),
             braid: Some(Braid {
                 color: rgb(0x000000),
-                alpha: 0.55,
+                alpha: 0.6,
             }),
             seam: Some(Seam {
-                color: rgb(0xff3b2f),
-                blur: 16.0,
-                spacing: 4,
-                size: 2.6,
+                color: rgb(0xff342a),
+                blur: 14.0,
+                spacing: 3,
+                size: 2.4,
             }),
         },
         Skin {

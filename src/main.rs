@@ -518,6 +518,44 @@ fn run_whip_command() -> i32 {
     }
 }
 
+/// Render a static whip pose in the named skin to a PNG, composited over a dark
+/// background so black-leather skins are visible. A dev/preview tool, not part
+/// of normal use. Returns a process exit code.
+fn render_skin_to_png(id: &str, out: &str) -> i32 {
+    let skins = skins::all();
+    let skin = skins[skins::index_of(id)];
+    let (w, h) = (620u32, 380u32);
+
+    let mut sim = Sim::new(Params::default());
+    sim.resize(w as f32, h as f32);
+    sim.spawn(130.0, h as f32 * 0.74, Instant::now());
+
+    let (Some(mut whip_pm), Some(mut pm)) = (Pixmap::new(w, h), Pixmap::new(w, h)) else {
+        eprintln!("render-skin: could not allocate pixmap");
+        return 1;
+    };
+    render::draw(&mut whip_pm, &sim, &RenderParams::default(), &skin);
+    pm.fill(tiny_skia::Color::from_rgba8(18, 10, 10, 255));
+    pm.draw_pixmap(
+        0,
+        0,
+        whip_pm.as_ref(),
+        &tiny_skia::PixmapPaint::default(),
+        tiny_skia::Transform::identity(),
+        None,
+    );
+    match pm.save_png(out) {
+        Ok(()) => {
+            println!("wrote {out} ({})", skin.id);
+            0
+        }
+        Err(e) => {
+            eprintln!("render-skin: {e}");
+            1
+        }
+    }
+}
+
 fn main() {
     let args: Vec<String> = std::env::args().collect();
 
@@ -531,6 +569,14 @@ fn main() {
     #[cfg(unix)]
     if args.iter().any(|a| a == "whip") {
         std::process::exit(run_whip_command());
+    }
+
+    // Dev/preview: `agent-whip render-skin <id> <out.png>` renders a static whip
+    // pose in the given skin to a PNG (no window, no tray), then exits.
+    if let Some(pos) = args.iter().position(|a| a == "render-skin") {
+        let id = args.get(pos + 1).map(String::as_str).unwrap_or("notorious");
+        let out = args.get(pos + 2).map(String::as_str).unwrap_or("skin.png");
+        std::process::exit(render_skin_to_png(id, out));
     }
 
     let selftest = args.iter().any(|a| a == "--selftest");

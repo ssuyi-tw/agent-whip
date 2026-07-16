@@ -155,8 +155,12 @@ Useful commands:
 
 ```bash
 ./target/release/agent-whip --version
-./target/release/agent-whip --dry-run # log prompts instead of typing them
-./target/release/agent-whip whip      # toggle an already-running instance
+./target/release/agent-whip --dry-run  # log prompts instead of typing them
+./target/release/agent-whip --selftest # synthetic cursor auto-cracks, exits (~5s)
+./target/release/agent-whip whip       # toggle an already-running instance
+
+# Preview a skin as a PNG without launching the app:
+./target/release/agent-whip render-skin notorious out.png # classic/notorious/chrome/gold/neon
 ```
 
 To install a source-built CLI on your `PATH`:
