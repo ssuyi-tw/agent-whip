@@ -29,6 +29,11 @@ permissions:
 jobs:
   bump:
     runs-on: macos-latest
+    env:
+      # Authenticate Homebrew's GitHub API calls (audit / livecheck) so the online
+      # audit doesn't hit the 60-req/hr unauthenticated rate limit on the runner.
+      HOMEBREW_GITHUB_API_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      HOMEBREW_NO_AUTO_UPDATE: 1
     steps:
       - name: Resolve version + tag
         id: v
