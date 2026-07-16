@@ -47,8 +47,8 @@ brew uninstall --zap --cask agent-whip
 ## How it works
 
 - **Menu-bar controls** — left-click the icon to summon or dismiss the whip.
-  Right-click to enable or disable prompt injection and sound, check for
-  updates, or quit.
+  Right-click to toggle prompt injection, sound, and the roar, pick a **Skin**,
+  check for updates, or quit.
 - **Focus-safe overlay** — the transparent, always-on-top overlay never takes
   focus, so the generated keystrokes go to your terminal or editor.
 - **Whip physics** — a Verlet rope simulation with distance constraints,
@@ -57,6 +57,13 @@ brew uninstall --zap --cask agent-whip
 - **Configurable crack** — crossing the tip-speed threshold plays a sound and
   types a randomly selected prompt. Prompts, `Enter`, `Ctrl-C`, and sounds are
   configurable.
+- **Guanzhang RRRRR roar** — layered over every crack, the signature roar from
+  Notorious Whip. The embedded clip is auto-trimmed to its loudest ~1.1 s so the
+  growl lands instantly, and rapid whips retrigger it instead of piling up.
+  Toggle it from the tray.
+- **Skins** — pick the whip's material from the tray "Skin" submenu: Classic
+  (black & white), Notorious (braided leather + red glow), Chrome, Gold, or
+  Neon. The choice is remembered across restarts.
 
 ## Configure the crack
 
@@ -234,6 +241,9 @@ tail -f /tmp/agent-whip.log
 | Keystrokes | `keybd_event` FFI / `osascript` / `xdotool` | `enigo` |
 | Cursor input | Overlay captures the mouse | Global polling with `device_query` |
 | Sound | Electron `Audio` | `rodio`, with embedded or custom clips |
+| Guanzhang roar | Web Audio decode + loudest window | `rodio` decode + loudest window, embedded |
+| Skins | Canvas gradients + `shadowBlur` | `tiny-skia` gradients + faked-bloom glow |
+| Skin/roar glow | `ctx.shadowBlur` | Translucent over-wide passes |
 
 ## Credits
 

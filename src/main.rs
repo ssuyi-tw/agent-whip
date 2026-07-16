@@ -12,6 +12,7 @@ mod input;
 mod keys;
 mod logging;
 mod render;
+mod skins;
 mod sound;
 mod sparkle;
 mod tray;
@@ -40,6 +41,10 @@ pub enum UserEvent {
     ToggleAction,
     /// Toggle the crack sound.
     ToggleSound,
+    /// Toggle the Guanzhang RRRRR roar layered over the crack.
+    ToggleRoar,
+    /// Pick a whip skin by index into `App::skins`.
+    SetSkin(usize),
     /// Check GitHub for a newer release and offer to install it.
     CheckUpdate,
     /// Show a small dialog with the app version (tray "About" item).
@@ -82,12 +87,20 @@ struct App {
     action_enabled: bool,
     /// Whether a crack plays a sound (toggled from the tray menu).
     sound_enabled: bool,
+    /// Whether the Guanzhang RRRRR roar is layered over the crack (tray toggle).
+    roar_enabled: bool,
+    /// Available whip skins and the index of the selected one (tray "Skin"
+    /// submenu; the choice is persisted across restarts).
+    skins: Vec<skins::Skin>,
+    skin_idx: usize,
     /// Sparkle auto-updater; `None` if the framework isn't embedded.
     updater: Option<sparkle::Updater>,
 }
 
 impl App {
     fn new(proxy: EventLoopProxy<UserEvent>, dry_run: bool, selftest: bool) -> Self {
+        let skins = skins::all();
+        let skin_idx = skins::index_of(&skins::load_selected_id());
         App {
             proxy,
             dry_run,
@@ -111,6 +124,9 @@ impl App {
             tick: 0,
             action_enabled: true,
             sound_enabled: true,
+            roar_enabled: true,
+            skins,
+            skin_idx,
             updater: None,
         }
     }
@@ -229,7 +245,7 @@ impl App {
 
         if self.sound_enabled {
             let sound = self.cfg.pick_sound();
-            self.sound.play_crack(sound);
+            self.sound.play_crack(sound, self.roar_enabled);
         }
 
         // The keystroke macro is the "action"; the tray menu can switch it off.
@@ -283,7 +299,7 @@ impl App {
             return;
         }
         if let (Some(g), Some(pm)) = (&mut self.gpu, &mut self.pixmap) {
-            render::draw(pm, &self.sim, &self.rp);
+            render::draw(pm, &self.sim, &self.rp, &self.skins[self.skin_idx]);
             g.render(pm.data());
         }
     }
@@ -293,7 +309,7 @@ impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, el: &ActiveEventLoop) {
         self.ensure_window(el);
         if self.tray.is_none() {
-            self.tray = Some(tray::build(self.proxy.clone()));
+            self.tray = Some(tray::build(self.proxy.clone(), &self.skins, self.skin_idx));
             // Start Sparkle and do one silent background check on launch (per
             // Terry's request). Sparkle also runs its own scheduled checks.
             if !self.selftest {
@@ -332,6 +348,26 @@ impl ApplicationHandler<UserEvent> for App {
             UserEvent::ToggleSound => {
                 self.sound_enabled = !self.sound_enabled;
                 log!("agent-whip: sound {}", on_off(self.sound_enabled));
+            }
+            UserEvent::ToggleRoar => {
+                self.roar_enabled = !self.roar_enabled;
+                log!("agent-whip: RRRRR roar {}", on_off(self.roar_enabled));
+            }
+            UserEvent::SetSkin(idx) => {
+                if idx < self.skins.len() {
+                    self.skin_idx = idx;
+                    let id = self.skins[idx].id;
+                    skins::save_selected_id(id);
+                    if let Some(t) = &self.tray {
+                        t.select_skin(idx);
+                    }
+                    log!("agent-whip: skin -> {id}");
+                    if self.visible
+                        && let Some(w) = &self.window
+                    {
+                        w.request_redraw();
+                    }
+                }
             }
             UserEvent::CheckUpdate => {
                 if let Some(u) = &self.updater {
