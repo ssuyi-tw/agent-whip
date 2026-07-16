@@ -1,0 +1,84 @@
+name: Bump Homebrew cask
+
+# When a release is published here, update the cask in the personal tap
+# (ssuyi-tw/homebrew-tap) to point at the new notarized DMG, then push.
+# Notarization stays on Terry's machine — this only *reads* the published DMG,
+# so no signing credentials live in CI.
+#
+# The DMG must already be attached to the release before it is published
+# (Terry's flow uploads the notarized DMG, then publishes). If an asset is added
+# after publishing, re-run this from the Actions tab via "Run workflow".
+#
+# One-time setup: create a fine-grained Personal Access Token with
+# "Contents: Read and write" scoped to the ssuyi-tw/homebrew-tap repository, and
+# save it as this repo's Actions secret named TAP_TOKEN
+# (Settings ▸ Secrets and variables ▸ Actions ▸ New repository secret).
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to bump the cask to (e.g. 0.3.2)"
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  bump:
+    runs-on: macos-latest
+    steps:
+      - name: Resolve version + tag
+        id: v
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            TAG="${{ github.event.release.tag_name }}"
+          else
+            TAG="v${{ github.event.inputs.version }}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          echo "Bumping cask to ${TAG#v} (tag $TAG)"
+
+      # Check out the app repo AT THE RELEASE TAG so Cargo.toml — which
+      # make-cask.sh reads for the version — matches the DMG being released.
+      - name: Checkout app repo
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.v.outputs.tag }}
+
+      - name: Checkout tap
+        uses: actions/checkout@v4
+        with:
+          repository: ssuyi-tw/homebrew-tap
+          path: homebrew-tap
+          token: ${{ secrets.TAP_TOKEN }}
+
+      # Downloads the published DMG, computes its sha256, and stamps version +
+      # sha256 into the tap's cask in place (leaves the rest of the file alone).
+      - name: Bump cask
+        run: TAP="$GITHUB_WORKSPACE/homebrew-tap" scripts/make-cask.sh
+
+      # Validate the bumped cask the same way a maintainer would: style + an
+      # online audit that re-downloads the DMG and confirms the sha256 matches.
+      - name: Validate cask
+        run: |
+          TAPS="$(brew --repository)/Library/Taps/ssuyi-tw"
+          mkdir -p "$TAPS"
+          ln -sfn "$GITHUB_WORKSPACE/homebrew-tap" "$TAPS/homebrew-tap"
+          brew style "$GITHUB_WORKSPACE/homebrew-tap/Casks/agent-whip.rb"
+          brew audit --cask --online ssuyi-tw/tap/agent-whip
+
+      - name: Commit + push tap
+        working-directory: homebrew-tap
+        run: |
+          if git diff --quiet; then
+            echo "cask already up to date; nothing to push"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git commit -am "agent-whip ${{ steps.v.outputs.version }}"
+          git push
