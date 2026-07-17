@@ -3,6 +3,15 @@
     <channel>
         <title>AgentWhip</title>
         <item>
+            <title>0.3.4</title>
+            <pubDate>Fri, 17 Jul 2026 11:56:45 +0800</pubDate>
+            <sparkle:version>0.3.4</sparkle:version>
+            <sparkle:shortVersionString>0.3.4</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
+            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
+            <enclosure url="https://github.com/ssuyi-tw/agent-whip/releases/download/v0.3.4/AgentWhip-0.3.4.dmg" length="6797216" type="application/octet-stream" sparkle:edSignature="Nm+sM1oNW2TSiO6TqLi3UaSZ+uuKFxcMl2KTqtu8EAkj6GlbhOY0kjWKmbc1fLCfIancVbUrmaoJT0z2P/SRCw=="/>
+        </item>
+        <item>
             <title>0.3.3</title>
             <pubDate>Thu, 16 Jul 2026 16:05:59 +0800</pubDate>
             <sparkle:version>0.3.3</sparkle:version>
@@ -19,15 +28,6 @@
             <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
             <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
             <enclosure url="https://github.com/ssuyi-tw/agent-whip/releases/download/v0.3.2/AgentWhip-0.3.2.dmg" length="6792044" type="application/octet-stream" sparkle:edSignature="QCFEP/+o1u+PYbhkUnTqmcZdoWeZsjc4wwM1XSC9/LE4yB9KTLny1HQLevY+XDf5ORv0WLYFA5wWxtxbpN60Bw=="/>
-        </item>
-        <item>
-            <title>0.3.1</title>
-            <pubDate>Wed, 15 Jul 2026 21:54:13 +0800</pubDate>
-            <sparkle:version>0.3.1</sparkle:version>
-            <sparkle:shortVersionString>0.3.1</sparkle:shortVersionString>
-            <sparkle:minimumSystemVersion>11.0</sparkle:minimumSystemVersion>
-            <sparkle:hardwareRequirements>arm64</sparkle:hardwareRequirements>
-            <enclosure url="https://github.com/ssuyi-tw/agent-whip/releases/download/v0.3.1/AgentWhip-0.3.1.dmg" length="9313883" type="application/octet-stream" sparkle:edSignature="rc3zEt0QxAPX+2FUixQ6pr0X3A9C7CAZZoQpusGZb+1Wi9+aZmu3YfiRLCr9vvY0AisTVW1Bwc54TUDOEt/6Bw=="/>
         </item>
     </channel>
 </rss>
