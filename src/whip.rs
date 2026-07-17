@@ -110,6 +110,28 @@ pub struct StepOutcome {
     pub finished: bool,
 }
 
+/// The rectangle the whip is confined to — the bounding box of all monitors in
+/// sim space. Coordinates can be negative (monitors left of / above the
+/// primary).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Bounds {
+    pub min_x: f32,
+    pub min_y: f32,
+    pub max_x: f32,
+    pub max_y: f32,
+}
+
+impl Default for Bounds {
+    fn default() -> Self {
+        Bounds {
+            min_x: 0.0,
+            min_y: 0.0,
+            max_x: 0.0,
+            max_y: 0.0,
+        }
+    }
+}
+
 /// The whole simulation, mirroring the module-level state in `overlay.html`.
 pub struct Sim {
     pub p: Params,
@@ -122,8 +144,7 @@ pub struct Sim {
     handle_ang_vel: f32,
     spawn_time: Instant,
     last_crack: Option<Instant>,
-    pub w: f32,
-    pub h: f32,
+    pub bounds: Bounds,
 }
 
 impl Sim {
@@ -139,14 +160,22 @@ impl Sim {
             handle_ang_vel: 0.0,
             spawn_time: Instant::now(),
             last_crack: None,
-            w: 0.0,
-            h: 0.0,
+            bounds: Bounds::default(),
         }
     }
 
+    /// Single-screen convenience: bounds spanning `(0,0)..(w,h)`.
     pub fn resize(&mut self, w: f32, h: f32) {
-        self.w = w;
-        self.h = h;
+        self.bounds = Bounds {
+            min_x: 0.0,
+            min_y: 0.0,
+            max_x: w,
+            max_y: h,
+        };
+    }
+
+    pub fn set_bounds(&mut self, bounds: Bounds) {
+        self.bounds = bounds;
     }
 
     pub fn set_mouse(&mut self, x: f32, y: f32) {
@@ -230,7 +259,7 @@ impl Sim {
         }
 
         cap_segment_stretch(&mut self.pts, &p);
-        apply_wall_collisions(&mut self.pts, &p, self.w, self.h, self.dropping);
+        apply_wall_collisions(&mut self.pts, &p, self.bounds, self.dropping);
         apply_base_pose(&mut self.pts, &p, self.handle_angle, self.dropping);
 
         // Distance constraints (multiple iterations for stiffness).
@@ -261,7 +290,7 @@ impl Sim {
                 apply_base_pose(&mut self.pts, &p, self.handle_angle, self.dropping);
             }
             cap_segment_stretch(&mut self.pts, &p);
-            apply_wall_collisions(&mut self.pts, &p, self.w, self.h, self.dropping);
+            apply_wall_collisions(&mut self.pts, &p, self.bounds, self.dropping);
         }
 
         // Tip velocity for crack detection.
@@ -281,7 +310,7 @@ impl Sim {
         }
 
         // If dropping, check if everything fell off screen.
-        if self.dropping && self.pts.iter().all(|pt| pt.y > self.h + 60.0) {
+        if self.dropping && self.pts.iter().all(|pt| pt.y > self.bounds.max_y + 60.0) {
             self.active = false;
             self.dropping = false;
             out.finished = true;
@@ -427,7 +456,7 @@ fn cap_segment_stretch(pts: &mut [Point], p: &Params) {
     }
 }
 
-fn apply_wall_collisions(pts: &mut [Point], p: &Params, w: f32, h: f32, dropping: bool) {
+fn apply_wall_collisions(pts: &mut [Point], p: &Params, b: Bounds, dropping: bool) {
     if dropping {
         return; // disable collisions while dropping
     }
@@ -437,15 +466,15 @@ fn apply_wall_collisions(pts: &mut [Point], p: &Params, w: f32, h: f32, dropping
         let mut vy = pt.y - pt.py;
         let mut hit = false;
 
-        if pt.x < 0.0 {
-            pt.x = 0.0;
+        if pt.x < b.min_x {
+            pt.x = b.min_x;
             if vx < 0.0 {
                 vx = -vx * p.wall_bounce;
             }
             vy *= p.wall_friction;
             hit = true;
-        } else if pt.x > w {
-            pt.x = w;
+        } else if pt.x > b.max_x {
+            pt.x = b.max_x;
             if vx > 0.0 {
                 vx = -vx * p.wall_bounce;
             }
@@ -453,15 +482,15 @@ fn apply_wall_collisions(pts: &mut [Point], p: &Params, w: f32, h: f32, dropping
             hit = true;
         }
 
-        if pt.y < 0.0 {
-            pt.y = 0.0;
+        if pt.y < b.min_y {
+            pt.y = b.min_y;
             if vy < 0.0 {
                 vy = -vy * p.wall_bounce;
             }
             vx *= p.wall_friction;
             hit = true;
-        } else if pt.y > h {
-            pt.y = h;
+        } else if pt.y > b.max_y {
+            pt.y = b.max_y;
             if vy > 0.0 {
                 vy = -vy * p.wall_bounce;
             }
@@ -540,6 +569,34 @@ mod tests {
             }
         }
         assert!(cracked, "a hard flick past the grace window should crack");
+    }
+
+    #[test]
+    fn negative_bounds_allow_crossing_into_left_monitor() {
+        let mut s = Sim::new(Params::default());
+        // Two side-by-side 1920x1080 monitors, secondary to the left of the
+        // primary: the union spans x in [-1920, 1920].
+        s.set_bounds(Bounds {
+            min_x: -1920.0,
+            min_y: 0.0,
+            max_x: 1920.0,
+            max_y: 1080.0,
+        });
+        let t = Instant::now();
+        s.spawn(100.0, 500.0, t);
+        // Drag the handle deep into the left monitor and settle.
+        s.set_mouse(-1500.0, 500.0);
+        for _ in 0..120 {
+            s.step(t);
+        }
+        // The rope must follow past the old x=0 wall instead of piling up on it.
+        assert!(
+            s.pts.iter().any(|pt| pt.x < -100.0),
+            "rope should cross into negative-x space, tip at {:?}",
+            s.pts.last()
+        );
+        // And nothing may sit left of the union's outer wall.
+        assert!(s.pts.iter().all(|pt| pt.x >= -1920.0));
     }
 
     #[test]

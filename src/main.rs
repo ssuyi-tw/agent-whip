@@ -25,13 +25,13 @@ use std::time::{Duration, Instant};
 
 use tiny_skia::Pixmap;
 use winit::application::ApplicationHandler;
-use winit::dpi::{PhysicalPosition, PhysicalSize};
+use winit::dpi::{LogicalPosition, LogicalSize};
 use winit::event::WindowEvent;
 use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop, EventLoopProxy};
 use winit::window::{Window, WindowId, WindowLevel};
 
 use render::RenderParams;
-use whip::{Params, Sim};
+use whip::{Bounds, Params, Sim};
 
 /// Events pushed into the loop from the tray (a different thread).
 #[derive(Debug, Clone, Copy)]
@@ -56,13 +56,48 @@ const FRAME: Duration = Duration::from_millis(16);
 /// Ignore "drop" clicks for this long after spawning, so the spawning click
 /// (e.g. releasing the tray) doesn't instantly drop the whip.
 const SPAWN_GUARD: Duration = Duration::from_millis(200);
+/// Extra slack (sim px) around a monitor when deciding whether the whip
+/// touches it — covers glow blur, stroke width, and spline overshoot.
+const DRAW_MARGIN: f32 = 100.0;
+
+/// One transparent click-through window covering one monitor. The sim runs in
+/// a global space; each overlay maps it into its own pixels as
+/// `p_win = p_sim * k - offset`.
+struct Overlay {
+    window: Arc<Window>,
+    gpu: gpu::Gpu,
+    pixmap: Pixmap,
+    /// `monitor_scale / ref_scale` — 1.0 on same-DPI setups.
+    k: f32,
+    /// The monitor's origin in its own physical pixels (logical pos × scale).
+    offset: (f32, f32),
+    /// Stroke widths pre-scaled by `k`.
+    rp: RenderParams,
+    /// Whether the last presented frame had whip pixels, so we clear exactly
+    /// once after the whip leaves this monitor instead of re-uploading forever.
+    drawn_last_frame: bool,
+}
+
+/// What the overlays were built for; when this changes (monitor hot-plug,
+/// rearrangement, resolution change) they are rebuilt on the next summon.
+type MonitorSig = Vec<((i32, i32), (u32, u32), u64)>;
+
+fn monitor_sig(el: &ActiveEventLoop) -> MonitorSig {
+    el.available_monitors()
+        .map(|m| {
+            let p = m.position();
+            let s = m.size();
+            ((p.x, p.y), (s.width, s.height), m.scale_factor().to_bits())
+        })
+        .collect()
+}
 
 struct App {
     proxy: EventLoopProxy<UserEvent>,
     dry_run: bool,
-    window: Option<Arc<Window>>,
-    gpu: Option<gpu::Gpu>,
-    pixmap: Option<Pixmap>,
+    gpu_ctx: gpu::GpuContext,
+    overlays: Vec<Overlay>,
+    monitors_sig: MonitorSig,
     sim: Sim,
     rp: RenderParams,
     input: Option<input::Input>,
@@ -70,8 +105,11 @@ struct App {
     sound: sound::Sound,
     tray: Option<tray::Tray>,
     visible: bool,
-    scale: f64,
-    monitor_pos: (i32, i32),
+    /// The primary monitor's scale factor — global cursor points × this give
+    /// sim coordinates (matching the old single-monitor behavior exactly).
+    ref_scale: f64,
+    /// Primary monitor's center in sim space (self-test cursor orbit).
+    primary_center: (f32, f32),
     spawn_at: Option<Instant>,
     /// User-editable crack config (phrases + toggles), reloaded on change.
     cfg: config::ConfigFile,
@@ -104,9 +142,9 @@ impl App {
         App {
             proxy,
             dry_run,
-            window: None,
-            gpu: None,
-            pixmap: None,
+            gpu_ctx: gpu::GpuContext::new(),
+            overlays: Vec::new(),
+            monitors_sig: Vec::new(),
             sim: Sim::new(Params::default()),
             rp: RenderParams::default(),
             input: None,
@@ -114,8 +152,8 @@ impl App {
             sound: sound::Sound::new(),
             tray: None,
             visible: false,
-            scale: 1.0,
-            monitor_pos: (0, 0),
+            ref_scale: 1.0,
+            primary_center: (640.0, 400.0),
             spawn_at: None,
             cfg: config::ConfigFile::init(),
             enigo: None,
@@ -131,49 +169,133 @@ impl App {
         }
     }
 
-    fn ensure_window(&mut self, el: &ActiveEventLoop) {
-        if self.window.is_some() {
+    /// Create (or rebuild, when the monitor layout changed) one overlay window
+    /// per monitor, and size the sim's wall bounds to the union of all of them.
+    ///
+    /// The sim runs in "reference pixels": global logical points × the primary
+    /// monitor's scale factor. On a single monitor this matches the old
+    /// single-window behavior exactly.
+    fn ensure_overlays(&mut self, el: &ActiveEventLoop) {
+        let sig = monitor_sig(el);
+        if !self.overlays.is_empty() && sig == self.monitors_sig {
             return;
         }
-        let monitor = el
+        if !self.overlays.is_empty() {
+            log!("agent-whip: monitor layout changed, rebuilding overlays");
+        }
+        self.overlays.clear();
+        self.monitors_sig = sig;
+
+        self.ref_scale = el
             .primary_monitor()
-            .or_else(|| el.available_monitors().next());
-        let (pos, size) = match &monitor {
-            Some(m) => (m.position(), m.size()),
-            None => (PhysicalPosition::new(0, 0), PhysicalSize::new(1280, 800)),
+            .or_else(|| el.available_monitors().next())
+            .map(|m| m.scale_factor())
+            .unwrap_or(1.0);
+        let primary_pos = el.primary_monitor().map(|m| m.position());
+
+        /// One monitor's geometry in global logical points (the cursor's space).
+        struct Mon {
+            pos: (f64, f64),
+            size: (f64, f64),
+            scale: f64,
+        }
+        // winit reports position/size in each monitor's own physical pixels, so
+        // divide its scale back out.
+        let mut monitors: Vec<Mon> = el
+            .available_monitors()
+            .map(|m| {
+                let scale = m.scale_factor();
+                let p = m.position();
+                let s = m.size();
+                Mon {
+                    pos: (p.x as f64 / scale, p.y as f64 / scale),
+                    size: (s.width as f64 / scale, s.height as f64 / scale),
+                    scale,
+                }
+            })
+            .collect();
+        if monitors.is_empty() {
+            monitors.push(Mon {
+                pos: (0.0, 0.0),
+                size: (1280.0, 800.0),
+                scale: 1.0,
+            });
+        }
+
+        let mut bounds = Bounds {
+            min_x: f32::MAX,
+            min_y: f32::MAX,
+            max_x: f32::MIN,
+            max_y: f32::MIN,
         };
+        for (idx, &Mon { pos, size, scale }) in monitors.iter().enumerate() {
+            bounds.min_x = bounds.min_x.min((pos.0 * self.ref_scale) as f32);
+            bounds.min_y = bounds.min_y.min((pos.1 * self.ref_scale) as f32);
+            bounds.max_x = bounds.max_x.max(((pos.0 + size.0) * self.ref_scale) as f32);
+            bounds.max_y = bounds.max_y.max(((pos.1 + size.1) * self.ref_scale) as f32);
 
-        let attrs = Window::default_attributes()
-            .with_title("agent-whip")
-            .with_decorations(false)
-            .with_transparent(true)
-            .with_resizable(false)
-            .with_visible(false)
-            .with_window_level(WindowLevel::AlwaysOnTop)
-            .with_inner_size(size)
-            .with_position(pos);
-        let window = Arc::new(el.create_window(attrs).expect("create overlay window"));
-        // Click-through: pointer events pass to the app underneath. We read the
-        // cursor globally instead (see input.rs).
-        let _ = window.set_cursor_hittest(false);
+            // Logical position/size sidestep any physical↔logical conversion
+            // ambiguity while the window is still off its target monitor.
+            let attrs = Window::default_attributes()
+                .with_title(format!("agent-whip {idx}"))
+                .with_decorations(false)
+                .with_transparent(true)
+                .with_resizable(false)
+                .with_visible(false)
+                .with_window_level(WindowLevel::AlwaysOnTop)
+                .with_inner_size(LogicalSize::new(size.0, size.1))
+                .with_position(LogicalPosition::new(pos.0, pos.1));
+            let window = Arc::new(el.create_window(attrs).expect("create overlay window"));
+            // Click-through: pointer events pass to the app underneath. We read
+            // the cursor globally instead (see input.rs).
+            let _ = window.set_cursor_hittest(false);
 
-        self.scale = window.scale_factor();
-        self.monitor_pos = (pos.x, pos.y);
+            let gpu = gpu::Gpu::new(&mut self.gpu_ctx, window.clone());
+            let (w, h) = gpu.size();
+            let pixmap = Pixmap::new(w, h).expect("allocate overlay pixmap");
+            let k = (scale / self.ref_scale) as f32;
+            self.overlays.push(Overlay {
+                window,
+                gpu,
+                pixmap,
+                k,
+                offset: ((pos.0 * scale) as f32, (pos.1 * scale) as f32),
+                rp: self.rp.scaled(k),
+                drawn_last_frame: false,
+            });
 
-        let g = gpu::Gpu::new(window.clone());
-        let (w, h) = g.size();
-        self.sim.resize(w as f32, h as f32);
-        self.pixmap = Pixmap::new(w, h);
-        self.gpu = Some(g);
-        self.window = Some(window);
+            let is_primary = match primary_pos {
+                Some(pp) => {
+                    (pp.x as f64 - pos.0 * scale).abs() < 1.0
+                        && (pp.y as f64 - pos.1 * scale).abs() < 1.0
+                }
+                None => idx == 0,
+            };
+            if is_primary {
+                self.primary_center = (
+                    ((pos.0 + size.0 * 0.5) * self.ref_scale) as f32,
+                    ((pos.1 + size.1 * 0.5) * self.ref_scale) as f32,
+                );
+            }
+        }
+        self.sim.set_bounds(bounds);
+        log!(
+            "agent-whip: {} overlay(s), sim bounds ({:.0},{:.0})..({:.0},{:.0})",
+            self.overlays.len(),
+            bounds.min_x,
+            bounds.min_y,
+            bounds.max_x,
+            bounds.max_y
+        );
     }
 
     /// Map a global cursor position (logical points, primary-display origin) to
-    /// the overlay surface's physical pixels.
+    /// sim coordinates.
     fn map_cursor(&self, c: (i32, i32)) -> (f32, f32) {
-        let x = c.0 as f64 * self.scale - self.monitor_pos.0 as f64;
-        let y = c.1 as f64 * self.scale - self.monitor_pos.1 as f64;
-        (x as f32, y as f32)
+        (
+            (c.0 as f64 * self.ref_scale) as f32,
+            (c.1 as f64 * self.ref_scale) as f32,
+        )
     }
 
     /// Lazily bring up global input access (prompts for macOS Accessibility on
@@ -194,8 +316,6 @@ impl App {
     }
 
     fn toggle(&mut self, el: &ActiveEventLoop) {
-        self.ensure_window(el);
-
         // Whip is up → drop it.
         if self.visible && self.sim.active && !self.sim.dropping {
             self.sim.drop();
@@ -203,6 +323,8 @@ impl App {
         }
         // Spawn a fresh whip at the cursor.
         if !self.visible {
+            // Rebuilds the overlays if monitors were (un)plugged or rearranged.
+            self.ensure_overlays(el);
             if !self.input_ready() {
                 return;
             }
@@ -216,17 +338,17 @@ impl App {
             self.sim.spawn(mx, my, now);
             self.spawn_at = Some(now);
             self.visible = true;
-            if let Some(w) = &self.window {
-                w.set_visible(true);
-                w.request_redraw();
+            for ov in &self.overlays {
+                ov.window.set_visible(true);
+                ov.window.request_redraw();
             }
             el.set_control_flow(ControlFlow::WaitUntil(now + FRAME));
         }
     }
 
     fn hide(&mut self, el: &ActiveEventLoop) {
-        if let Some(w) = &self.window {
-            w.set_visible(false);
+        for ov in &self.overlays {
+            ov.window.set_visible(false);
         }
         self.visible = false;
         // Stay ticking if a deferred keystroke is still owed.
@@ -294,20 +416,60 @@ impl App {
         self.pending_type.is_some()
     }
 
-    fn render_frame(&mut self) {
-        if !self.visible {
+    /// Render one overlay: transform the sim points into its window space and
+    /// draw, skipping the rasterization entirely while the whip is off that
+    /// monitor (clearing once as it leaves).
+    fn render_overlay(&mut self, idx: usize) {
+        if !self.visible || idx >= self.overlays.len() {
             return;
         }
-        if let (Some(g), Some(pm)) = (&mut self.gpu, &mut self.pixmap) {
-            render::draw(pm, &self.sim, &self.rp, &self.skins[self.skin_idx]);
-            g.render(pm.data());
+        let skin = self.skins[self.skin_idx];
+        let active = self.sim.active && self.sim.pts.len() >= 2;
+        let ov = &mut self.overlays[idx];
+
+        let pts: Vec<whip::Point> = self
+            .sim
+            .pts
+            .iter()
+            .map(|p| whip::Point {
+                x: p.x * ov.k - ov.offset.0,
+                y: p.y * ov.k - ov.offset.1,
+                px: p.px * ov.k - ov.offset.0,
+                py: p.py * ov.k - ov.offset.1,
+            })
+            .collect();
+
+        let (w, h) = ov.gpu.size();
+        let margin = DRAW_MARGIN * ov.k;
+        let (mut min_x, mut min_y) = (f32::MAX, f32::MAX);
+        let (mut max_x, mut max_y) = (f32::MIN, f32::MIN);
+        for p in &pts {
+            min_x = min_x.min(p.x);
+            min_y = min_y.min(p.y);
+            max_x = max_x.max(p.x);
+            max_y = max_y.max(p.y);
+        }
+        let touches = active
+            && max_x >= -margin
+            && min_x <= w as f32 + margin
+            && max_y >= -margin
+            && min_y <= h as f32 + margin;
+
+        if touches {
+            render::draw(&mut ov.pixmap, &pts, &ov.rp, &skin);
+            ov.gpu.render(ov.pixmap.data());
+            ov.drawn_last_frame = true;
+        } else if ov.drawn_last_frame {
+            ov.pixmap.fill(tiny_skia::Color::TRANSPARENT);
+            ov.gpu.render(ov.pixmap.data());
+            ov.drawn_last_frame = false;
         }
     }
 }
 
 impl ApplicationHandler<UserEvent> for App {
     fn resumed(&mut self, el: &ActiveEventLoop) {
-        self.ensure_window(el);
+        self.ensure_overlays(el);
         if self.tray.is_none() {
             self.tray = Some(tray::build(self.proxy.clone(), &self.skins, self.skin_idx));
             // Start Sparkle and do one silent background check on launch (per
@@ -320,14 +482,14 @@ impl ApplicationHandler<UserEvent> for App {
             }
         }
         if self.selftest {
-            let (cx, cy) = (self.sim.w * 0.5, self.sim.h * 0.5);
+            let (cx, cy) = self.primary_center;
             let now = Instant::now();
             self.sim.spawn(cx, cy, now);
             self.spawn_at = Some(now);
             self.visible = true;
-            if let Some(w) = &self.window {
-                w.set_visible(true);
-                w.request_redraw();
+            for ov in &self.overlays {
+                ov.window.set_visible(true);
+                ov.window.request_redraw();
             }
             el.set_control_flow(ControlFlow::WaitUntil(now + FRAME));
             return;
@@ -362,10 +524,10 @@ impl ApplicationHandler<UserEvent> for App {
                         t.select_skin(idx);
                     }
                     log!("agent-whip: skin -> {id}");
-                    if self.visible
-                        && let Some(w) = &self.window
-                    {
-                        w.request_redraw();
+                    if self.visible {
+                        for ov in &self.overlays {
+                            ov.window.request_redraw();
+                        }
                     }
                 }
             }
@@ -378,19 +540,24 @@ impl ApplicationHandler<UserEvent> for App {
         }
     }
 
-    fn window_event(&mut self, el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
+    fn window_event(&mut self, el: &ActiveEventLoop, id: WindowId, event: WindowEvent) {
+        let idx = self.overlays.iter().position(|ov| ov.window.id() == id);
         match event {
             // Keep the app alive in the tray; never actually close.
             WindowEvent::CloseRequested => self.hide(el),
             WindowEvent::Resized(size) => {
-                if let Some(g) = &mut self.gpu {
-                    g.resize(size.width, size.height);
-                    let (w, h) = g.size();
-                    self.sim.resize(w as f32, h as f32);
-                    self.pixmap = Pixmap::new(w, h);
+                if let Some(idx) = idx {
+                    let ov = &mut self.overlays[idx];
+                    ov.gpu.resize(size.width, size.height);
+                    let (w, h) = ov.gpu.size();
+                    ov.pixmap = Pixmap::new(w, h).expect("allocate overlay pixmap");
                 }
             }
-            WindowEvent::RedrawRequested => self.render_frame(),
+            WindowEvent::RedrawRequested => {
+                if let Some(idx) = idx {
+                    self.render_overlay(idx);
+                }
+            }
             _ => {}
         }
     }
@@ -417,8 +584,7 @@ impl ApplicationHandler<UserEvent> for App {
                 el.exit();
                 return;
             }
-            let cx = self.sim.w * 0.5;
-            let cy = self.sim.h * 0.5;
+            let (cx, cy) = self.primary_center;
             let t = self.tick as f32;
             let mx = cx + 500.0 * (t * 0.25).sin();
             let my = cy + 250.0 * (t * 0.17).cos();
@@ -427,8 +593,8 @@ impl ApplicationHandler<UserEvent> for App {
             if out.crack {
                 self.crack(now);
             }
-            if let Some(w) = &self.window {
-                w.request_redraw();
+            for ov in &self.overlays {
+                ov.window.request_redraw();
             }
             el.set_control_flow(ControlFlow::WaitUntil(now + FRAME));
             return;
@@ -464,8 +630,8 @@ impl ApplicationHandler<UserEvent> for App {
             return;
         }
 
-        if let Some(w) = &self.window {
-            w.request_redraw();
+        for ov in &self.overlays {
+            ov.window.request_redraw();
         }
         el.set_control_flow(ControlFlow::WaitUntil(now + FRAME));
     }
@@ -534,7 +700,7 @@ fn render_skin_to_png(id: &str, out: &str) -> i32 {
         eprintln!("render-skin: could not allocate pixmap");
         return 1;
     };
-    render::draw(&mut whip_pm, &sim, &RenderParams::default(), &skin);
+    render::draw(&mut whip_pm, &sim.pts, &RenderParams::default(), &skin);
     pm.fill(tiny_skia::Color::from_rgba8(18, 10, 10, 255));
     pm.draw_pixmap(
         0,
