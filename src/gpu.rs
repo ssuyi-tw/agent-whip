@@ -49,6 +49,54 @@ fn fs(in: VOut) -> @location(0) vec4<f32> {
 }
 "#;
 
+/// Instance/adapter/device/queue shared by every overlay window, so N monitors
+/// don't spawn N wgpu devices. The adapter and device are created lazily with
+/// the first window's surface (adapter selection wants a compatible surface).
+pub struct GpuContext {
+    instance: wgpu::Instance,
+    ready: Option<(wgpu::Adapter, wgpu::Device, wgpu::Queue)>,
+}
+
+impl GpuContext {
+    pub fn new() -> Self {
+        GpuContext {
+            instance: wgpu::Instance::new(wgpu::InstanceDescriptor {
+                backends: wgpu::Backends::all(),
+                ..wgpu::InstanceDescriptor::new_without_display_handle()
+            }),
+            ready: None,
+        }
+    }
+
+    fn ensure_device(&mut self, surface: &wgpu::Surface<'static>) {
+        if self.ready.is_some() {
+            return;
+        }
+        let adapter =
+            pollster::block_on(self.instance.request_adapter(&wgpu::RequestAdapterOptions {
+                power_preference: wgpu::PowerPreference::LowPower,
+                force_fallback_adapter: false,
+                compatible_surface: Some(surface),
+                apply_limit_buckets: false,
+            }))
+            .expect("no suitable GPU adapter");
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("agent-whip device"),
+            required_features: wgpu::Features::empty(),
+            // The overlay is a full-screen surface, so we need the adapter's real
+            // texture limits — the conservative downlevel defaults cap at 2048px.
+            required_limits: adapter.limits(),
+            experimental_features: wgpu::ExperimentalFeatures::disabled(),
+            memory_hints: wgpu::MemoryHints::default(),
+            trace: wgpu::Trace::Off,
+        }))
+        .expect("request device");
+        self.ready = Some((adapter, device, queue));
+    }
+}
+
+/// Per-window presentation state (surface, pipeline, texture). The device and
+/// queue are shared via [`GpuContext`].
 pub struct Gpu {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -64,35 +112,19 @@ pub struct Gpu {
 }
 
 impl Gpu {
-    pub fn new(window: Arc<Window>) -> Self {
+    pub fn new(ctx: &mut GpuContext, window: Arc<Window>) -> Self {
         let phys = window.inner_size();
         let size = (phys.width.max(1), phys.height.max(1));
 
-        let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::all(),
-            ..wgpu::InstanceDescriptor::new_without_display_handle()
-        });
-        let surface = instance
+        let surface = ctx
+            .instance
             .create_surface(window.clone())
             .expect("create wgpu surface");
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::LowPower,
-            force_fallback_adapter: false,
-            compatible_surface: Some(&surface),
-            apply_limit_buckets: false,
-        }))
-        .expect("no suitable GPU adapter");
-        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-            label: Some("agent-whip device"),
-            required_features: wgpu::Features::empty(),
-            // The overlay is a full-screen surface, so we need the adapter's real
-            // texture limits — the conservative downlevel defaults cap at 2048px.
-            required_limits: adapter.limits(),
-            experimental_features: wgpu::ExperimentalFeatures::disabled(),
-            memory_hints: wgpu::MemoryHints::default(),
-            trace: wgpu::Trace::Off,
-        }))
-        .expect("request device");
+        ctx.ensure_device(&surface);
+        let (adapter, device, queue) = {
+            let (a, d, q) = ctx.ready.as_ref().unwrap();
+            (a.clone(), d.clone(), q.clone())
+        };
 
         let caps = surface.get_capabilities(&adapter);
         let format = caps

@@ -9,7 +9,7 @@
 //! equivalent, so they're approximated with a few translucent over-wide passes.
 
 use crate::skins::{Braid, Glow, Seam, Skin, SkinType};
-use crate::whip::{Point, Sim};
+use crate::whip::Point;
 use tiny_skia::{
     Color, FillRule, GradientStop, LineCap, LineJoin, LinearGradient, Paint, Path, PathBuilder,
     Pixmap, Point as SkPoint, SpreadMode, Stroke, Transform,
@@ -33,6 +33,20 @@ impl Default for RenderParams {
             outline_width: 3.0,
             handle_extra_width: 5.0,
             handle_thick_segments: 2,
+        }
+    }
+}
+
+impl RenderParams {
+    /// Stroke widths scaled by `k`, so the rope has the same on-screen
+    /// thickness on monitors whose DPI differs from the reference monitor.
+    pub fn scaled(&self, k: f32) -> RenderParams {
+        RenderParams {
+            line_width_handle: self.line_width_handle * k,
+            line_width_tip: self.line_width_tip * k,
+            outline_width: self.outline_width * k,
+            handle_extra_width: self.handle_extra_width * k,
+            handle_thick_segments: self.handle_thick_segments,
         }
     }
 }
@@ -149,16 +163,17 @@ fn segment_path(pts: &[Point], i: usize) -> Option<Path> {
     pb.finish()
 }
 
-/// Clear the pixmap and, if a whip is present, draw it in the given skin.
-pub fn draw(pixmap: &mut Pixmap, sim: &Sim, rp: &RenderParams, skin: &Skin) {
+/// Clear the pixmap and draw the rope through `pts` (already transformed into
+/// this pixmap's pixel space) in the given skin.
+pub fn draw(pixmap: &mut Pixmap, pts: &[Point], rp: &RenderParams, skin: &Skin) {
     pixmap.fill(Color::TRANSPARENT);
 
-    if !sim.active || sim.pts.len() < 2 {
+    if pts.len() < 2 {
         return;
     }
     match skin.kind {
-        SkinType::Flat => draw_flat(pixmap, &sim.pts, rp, skin),
-        SkinType::Tube => draw_tube(pixmap, &sim.pts, rp, skin),
+        SkinType::Flat => draw_flat(pixmap, pts, rp, skin),
+        SkinType::Tube => draw_tube(pixmap, pts, rp, skin),
     }
 }
 
