@@ -144,6 +144,9 @@ pub struct Sim {
     handle_ang_vel: f32,
     spawn_time: Instant,
     last_crack: Option<Instant>,
+    /// No crack may fire before this time — set when the cursor crosses
+    /// between monitors, where the naturally fast motion would false-trigger.
+    crack_inhibit_until: Option<Instant>,
     pub bounds: Bounds,
 }
 
@@ -160,6 +163,7 @@ impl Sim {
             handle_ang_vel: 0.0,
             spawn_time: Instant::now(),
             last_crack: None,
+            crack_inhibit_until: None,
             bounds: Bounds::default(),
         }
     }
@@ -182,6 +186,12 @@ impl Sim {
         self.mouse = (x, y);
     }
 
+    /// Suppress crack detection until `until`. The whip keeps animating; only
+    /// the crack event (sound + keystrokes) is held back.
+    pub fn inhibit_crack(&mut self, until: Instant) {
+        self.crack_inhibit_until = Some(until);
+    }
+
     /// Nice upward arc from the handle (mouse) to the tip.
     pub fn spawn(&mut self, mx: f32, my: f32, now: Instant) {
         let p = self.p;
@@ -196,6 +206,7 @@ impl Sim {
         self.active = true;
         self.dropping = false;
         self.last_crack = None;
+        self.crack_inhibit_until = None;
         self.spawn_time = now;
         self.mouse = (mx, my);
         self.prev_mouse = (mx, my);
@@ -303,7 +314,8 @@ impl Sim {
                 .last_crack
                 .map(|t| now.duration_since(t) > p.crack_cooldown)
                 .unwrap_or(true);
-            if past_grace && past_cooldown {
+            let inhibited = self.crack_inhibit_until.map(|t| now < t).unwrap_or(false);
+            if past_grace && past_cooldown && !inhibited {
                 self.last_crack = Some(now);
                 out.crack = true;
             }
@@ -569,6 +581,38 @@ mod tests {
             }
         }
         assert!(cracked, "a hard flick past the grace window should crack");
+    }
+
+    #[test]
+    fn inhibit_blocks_crack_until_window_expires() {
+        let mut s = sim();
+        let t0 = Instant::now();
+        s.spawn(500.0, 500.0, t0);
+        let after = t0 + Duration::from_millis(400);
+        for _ in 0..5 {
+            s.step(after);
+        }
+        // A monitor crossing was just detected: hold cracks for one second.
+        s.inhibit_crack(after + Duration::from_secs(1));
+        s.set_mouse(1600.0, 900.0);
+        for _ in 0..10 {
+            assert!(!s.step(after).crack, "no crack may fire while inhibited");
+        }
+
+        // Once the window has expired, the same hard flick cracks again.
+        let later = after + Duration::from_secs(2);
+        for _ in 0..5 {
+            s.step(later);
+        }
+        s.set_mouse(300.0, 200.0);
+        let mut cracked = false;
+        for _ in 0..10 {
+            if s.step(later).crack {
+                cracked = true;
+                break;
+            }
+        }
+        assert!(cracked, "cracks must resume after the inhibit window");
     }
 
     #[test]

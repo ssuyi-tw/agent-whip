@@ -59,6 +59,10 @@ const SPAWN_GUARD: Duration = Duration::from_millis(200);
 /// Extra slack (sim px) around a monitor when deciding whether the whip
 /// touches it — covers glow blur, stroke width, and spline overshoot.
 const DRAW_MARGIN: f32 = 100.0;
+/// Hold cracks for this long after the cursor crosses between monitors —
+/// throwing the cursor to another screen is naturally fast and would
+/// false-trigger the crack (sound + typed command).
+const MONITOR_CROSS_GRACE: Duration = Duration::from_millis(500);
 
 /// One transparent click-through window covering one monitor. The sim runs in
 /// a global space; each overlay maps it into its own pixels as
@@ -110,6 +114,11 @@ struct App {
     ref_scale: f64,
     /// Primary monitor's center in sim space (self-test cursor orbit).
     primary_center: (f32, f32),
+    /// Monitor rects `(x, y, w, h)` in global logical points, in overlay order
+    /// — used to notice the cursor crossing between monitors.
+    monitor_rects: Vec<(f64, f64, f64, f64)>,
+    /// Which of `monitor_rects` the cursor was on last frame.
+    cursor_monitor: Option<usize>,
     spawn_at: Option<Instant>,
     /// User-editable crack config (phrases + toggles), reloaded on change.
     cfg: config::ConfigFile,
@@ -154,6 +163,8 @@ impl App {
             visible: false,
             ref_scale: 1.0,
             primary_center: (640.0, 400.0),
+            monitor_rects: Vec::new(),
+            cursor_monitor: None,
             spawn_at: None,
             cfg: config::ConfigFile::init(),
             enigo: None,
@@ -184,6 +195,8 @@ impl App {
             log!("agent-whip: monitor layout changed, rebuilding overlays");
         }
         self.overlays.clear();
+        self.monitor_rects.clear();
+        self.cursor_monitor = None;
         self.monitors_sig = sig;
 
         self.ref_scale = el
@@ -229,6 +242,7 @@ impl App {
             max_y: f32::MIN,
         };
         for (idx, &Mon { pos, size, scale }) in monitors.iter().enumerate() {
+            self.monitor_rects.push((pos.0, pos.1, size.0, size.1));
             bounds.min_x = bounds.min_x.min((pos.0 * self.ref_scale) as f32);
             bounds.min_y = bounds.min_y.min((pos.1 * self.ref_scale) as f32);
             bounds.max_x = bounds.max_x.max(((pos.0 + size.0) * self.ref_scale) as f32);
@@ -298,6 +312,28 @@ impl App {
         )
     }
 
+    /// Which monitor a global cursor position (logical points) is on.
+    fn monitor_at(&self, c: (i32, i32)) -> Option<usize> {
+        let (x, y) = (c.0 as f64, c.1 as f64);
+        self.monitor_rects
+            .iter()
+            .position(|&(mx, my, mw, mh)| x >= mx && x < mx + mw && y >= my && y < my + mh)
+    }
+
+    /// Note which monitor the cursor is on; on a crossing, hold cracks briefly
+    /// so the naturally fast throw to another screen doesn't false-trigger.
+    fn track_cursor_monitor(&mut self, cursor: (i32, i32), now: Instant) {
+        let cur = self.monitor_at(cursor);
+        if let (Some(prev), Some(new)) = (self.cursor_monitor, cur)
+            && prev != new
+        {
+            self.sim.inhibit_crack(now + MONITOR_CROSS_GRACE);
+        }
+        if cur.is_some() {
+            self.cursor_monitor = cur;
+        }
+    }
+
     /// Lazily bring up global input access (prompts for macOS Accessibility on
     /// first use). Returns whether input is available.
     fn input_ready(&mut self) -> bool {
@@ -334,6 +370,8 @@ impl App {
                 input.cursor()
             };
             let (mx, my) = self.map_cursor(cursor);
+            // Seed the crossing tracker so the first poll isn't a "crossing".
+            self.cursor_monitor = self.monitor_at(cursor);
             let now = Instant::now();
             self.sim.spawn(mx, my, now);
             self.spawn_at = Some(now);
@@ -607,6 +645,7 @@ impl ApplicationHandler<UserEvent> for App {
                 return;
             }
         };
+        self.track_cursor_monitor(cursor, now);
         let (mx, my) = self.map_cursor(cursor);
         self.sim.set_mouse(mx, my);
 
